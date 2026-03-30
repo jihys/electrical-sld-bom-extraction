@@ -1,7 +1,7 @@
-"""Typed messages flowing between MAF workflow executors.
+"""Typed messages flowing between workflow executors.
 
-Each message class matches the exact fields sent by the corresponding
-Executor in workflow/executors.py.
+Each message class matches the fields used by the corresponding
+executor in workflow/executors.py.
 """
 
 from typing import Any, Dict, List, Optional, Tuple

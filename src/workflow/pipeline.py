@@ -1,4 +1,4 @@
-"""Workflow pipeline definition using Microsoft Agent Framework WorkflowBuilder."""
+"""Workflow pipeline definition using WorkflowBuilder."""
 
 from __future__ import annotations
 

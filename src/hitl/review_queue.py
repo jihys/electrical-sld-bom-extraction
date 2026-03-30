@@ -13,7 +13,7 @@ class ReviewQueue:
     """Thread-safe queue for HITL review requests.
 
     Flow:
-    1. ValidationExecutor calls ctx.request_info() → MAF emits request_info event
+    1. ValidationExecutor calls ctx.request_info() → emits request_info event
     2. FastAPI event handler catches it and calls queue.add_request()
     3. Gradio UI polls queue.get_pending() and shows bbox editor
     4. Human submits corrections → queue.submit_response()

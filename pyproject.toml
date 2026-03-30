@@ -8,8 +8,6 @@ version = "0.1.0"
 description = "Agentic CAD panel extraction system with Human-in-the-Loop"
 requires-python = ">=3.10"
 dependencies = [
-    # Microsoft Agent Framework
-    "agent-framework-core>=1.0.0rc1",
     # Azure AI
     "azure-ai-documentintelligence>=1.0.0",
     "azure-identity>=1.15.0",

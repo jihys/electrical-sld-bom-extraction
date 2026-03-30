@@ -1,4 +1,4 @@
-"""Workflow Executors — MAF Executor nodes for the panel extraction pipeline.
+"""Workflow Executors — Executor nodes for the panel extraction pipeline.
 
 Each Executor handles one stage of the pipeline:
   1. SegmentExecutor   — PDF → per-page PNG/SVG

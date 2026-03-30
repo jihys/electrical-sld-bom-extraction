@@ -3,7 +3,7 @@
 CAD Single Line Diagram(SLD)에서 전기 패널 영역을 추출하는 멀티 에이전트 시스템.
 
 ## Tech Stack
-- **Backend**: Python, FastAPI, Microsoft Agent Framework SDK
+- **Backend**: Python, FastAPI
 - **Frontend**: Streamlit (HITL UI) at `http://localhost:8501`
 - **LLM**: Azure OpenAI (Responses API)
 - **OCR**: Azure Document Intelligence (2-pass figure detection)

@@ -1,8 +1,8 @@
 # Electrical SLD (Single Line Diagram) BOM Extraction
 
-Multi-agent system for extracting electrical panel areas and Bill of Materials from CAD Single Line Diagrams.
+Agentic pipeline for extracting electrical panel areas and Bill of Materials (BOM) from CAD Single Line Diagrams.
 
-Built on **Microsoft Agent Framework** Python SDK with **Human-in-the-Loop** (HITL) via Streamlit and served as a **FastAPI** web service.
+Uses **Azure OpenAI** (GPT-4o) + **Azure Document Intelligence** for detection and extraction, with a **Streamlit** Human-in-the-Loop UI.
 
 ## Prerequisites
 
@@ -141,15 +141,12 @@ electrical-sld-bom-extraction/
 │   ├── tools/              # Pure functions (PDF, image, geometry)
 │   ├── agents/             # LLM-based logic (prompts, matching, extraction)
 │   ├── validators/         # Cross-panel validation
-│   ├── workflow/           # MAF Executor classes + pipeline graph
+│   ├── workflow/           # Pipeline executor classes
 │   ├── hitl/               # Streamlit UI + review queue
 │   └── api/                # FastAPI routes
 └── tests/
     ├── e2e_demo_test.py    # Playwright E2E test
-    ├── e2e_full_test.py    # Full scenario E2E test
-    ├── test_geometry.py
-    ├── test_validators.py
-    └── test_matching.py
+    └── e2e_full_test.py    # Full scenario E2E test
 ```
 
 ## Make Commands
@@ -191,9 +188,7 @@ make test-e2e
 
 ## Key Design Decisions
 
-- **Microsoft Agent Framework** `Executor`/`@handler`/`WorkflowBuilder` pattern for each pipeline stage
-- **Circular edges not used** — locate→verify loop is internal to `LocateVerifyExecutor`
+- **Multi-stage pipeline** — each stage has a dedicated executor class
 - **Confidence-based HITL** — only panels below threshold (0.7) trigger human review
-- **`FileCheckpointStorage`** — enables crash recovery and long-running workflows
 - **Hallucination guard** — LLM-extracted panel names validated against DI OCR output
 - **Oscillation detection** — prevents locate→verify from endlessly toggling edge coordinates
