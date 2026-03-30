@@ -4,6 +4,20 @@ Agentic pipeline for extracting electrical panel areas and Bill of Materials (BO
 
 Uses **Azure OpenAI** (GPT-4o) + **Azure Document Intelligence** for detection and extraction, with a **Streamlit** Human-in-the-Loop UI.
 
+## Demo Screenshots
+
+| Getting Started | Step 1 — Upload & Select Pages |
+|:---:|:---:|
+| ![Getting Started](docs/images/01_getting_started.png) | ![Upload Pages](docs/images/02_upload_pages.png) |
+
+| Step 2 — Figure Detection (HITL #1) | Step 4 — Panel Areas & Bay |
+|:---:|:---:|
+| ![Figure Detection](docs/images/03_figure_detection.png) | ![Panel Areas](docs/images/04_panel_areas.png) |
+
+| Step 4 — Panel Crops | Step 5 — BOM Extraction |
+|:---:|:---:|
+| ![Panel Crops](docs/images/05_panel_crops.png) | ![BOM Extraction](docs/images/06_bom_extraction.png) |
+
 ## Prerequisites
 
 - **Python 3.10+**
