@@ -2,7 +2,7 @@
 
 Agentic pipeline for extracting electrical panel areas and Bill of Materials (BOM) from CAD Single Line Diagrams.
 
-Uses **Azure OpenAI** (GPT-4o) + **Azure Document Intelligence** for detection and extraction, with a **Streamlit** Human-in-the-Loop UI.
+Uses **Azure OpenAI** (GPT-5.4) + **Azure Document Intelligence** for detection and extraction, with a **Streamlit** Human-in-the-Loop UI.
 
 ## Demo Screenshots
 
@@ -21,7 +21,7 @@ Uses **Azure OpenAI** (GPT-4o) + **Azure Document Intelligence** for detection a
 ## Prerequisites
 
 - **Python 3.10+**
-- **Azure OpenAI** resource (GPT-4o or later with Responses API support)
+- **Azure OpenAI** resource (GPT-5.4 or later with Responses API support)
 - **Azure Document Intelligence** resource (prebuilt-layout model)
 
 ## Quick Start
@@ -65,7 +65,7 @@ Edit `.env` with your actual values:
 AZURE_OPENAI_ENDPOINT=https://<your-resource>.openai.azure.com/
 AZURE_OPENAI_API_KEY=<your-key>          # or leave empty for DefaultAzureCredential
 AZURE_OPENAI_API_VERSION=2025-03-01-preview
-AZURE_OPENAI_DEPLOYMENT=<your-deployment>  # e.g. gpt-4o
+AZURE_OPENAI_DEPLOYMENT=<your-deployment>  # e.g. gpt-5.4
 
 # Azure Document Intelligence
 AZURE_DI_ENDPOINT=https://<your-di>.cognitiveservices.azure.com
