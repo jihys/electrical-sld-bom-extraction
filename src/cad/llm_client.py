@@ -202,6 +202,7 @@ def make_client() -> tuple[AzureOpenAI, str]:
         api_version=api_version,
         azure_endpoint=endpoint,
         azure_ad_token_provider=token_provider,
+        timeout=120,
     )
     return client, deployment
 

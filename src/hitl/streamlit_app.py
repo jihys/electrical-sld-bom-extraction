@@ -1179,29 +1179,112 @@ def render_step3():
                     st.rerun()
         if tab_edit is not None:
             with tab_edit:
+                DISP_W_S3 = 700
+                h_orig, w_orig = img.shape[:2]
+                scale_s3 = DISP_W_S3 / w_orig
+                disp_h_s3 = int(h_orig * scale_s3)
+                HEX_COLORS_S3 = ["#0078D4","#5C2D91","#008B8B","#B4009E","#00BCF2","#7FBA00","#3A96DD","#E81123","#FF8C00","#10893E"]
+                _canvas_s3_ok = False
+                if _CANVAS_AVAILABLE:
+                  try:
+                    init_objs_s3 = []
+                    name_order_s3 = []
+                    for idx_s3, nm_s3 in enumerate(names):
+                        m_s3 = matches.get(nm_s3)
+                        if m_s3 and m_s3.get("bbox"):
+                            bx = m_s3["bbox"]
+                            init_objs_s3.append({
+                                "type": "rect",
+                                "left": round(int(bx[0]) * scale_s3),
+                                "top": round(int(bx[1]) * scale_s3),
+                                "width": round((int(bx[2]) - int(bx[0])) * scale_s3),
+                                "height": round((int(bx[3]) - int(bx[1])) * scale_s3),
+                                "fill": "rgba(0,0,0,0)",
+                                "stroke": HEX_COLORS_S3[idx_s3 % len(HEX_COLORS_S3)],
+                                "strokeWidth": 3,
+                            })
+                            name_order_s3.append(nm_s3)
+                    default_s3 = {"version": "4.4.0", "objects": init_objs_s3}
+                    _s3_bg_key = f"_s3_canvas_bg_{pn}"
+                    if _s3_bg_key not in st.session_state:
+                        img_r_s3 = cv2.resize(img, (DISP_W_S3, disp_h_s3))
+                        st.session_state[_s3_bg_key] = Image.fromarray(_bgr_to_rgb(img_r_s3))
+                    bg_pil_s3 = st.session_state[_s3_bg_key]
+
+                    def _make_s3_fragment(_pn, _dd, _scale, _w_orig, _h_orig, _disp_h, _names, _name_order, _matches, _nbp, _mbp, _bg_key, _DISP_W):
+                        @st.fragment
+                        def _canvas_s3_fragment():
+                            _bg_pil = st.session_state.get(_bg_key)
+                            if _bg_pil is None:
+                                _bg_pil = Image.fromarray(_bgr_to_rgb(cv2.resize(_load_img(pg["png_path"]), (_DISP_W, _disp_h))))
+                                st.session_state[_bg_key] = _bg_pil
+
+                            # Legend: color → name mapping
+                            legend_items = []
+                            _hc = ["#0078D4","#5C2D91","#008B8B","#B4009E","#00BCF2","#7FBA00","#3A96DD","#E81123","#FF8C00","#10893E"]
+                            for li, nm in enumerate(_name_order):
+                                c = _hc[li % len(_hc)]
+                                legend_items.append(f'<span style="color:{c};font-weight:bold">■</span> {nm}')
+                            if legend_items:
+                                st.markdown(" &nbsp; ".join(legend_items), unsafe_allow_html=True)
+
+                            st.info("Drag rectangles to move/resize panel name boxes → click **Apply Changes**")
+                            st_canvas_fn = _st_canvas_fn
+                            canvas_result = st_canvas_fn(
+                                fill_color="rgba(0,0,0,0)", stroke_width=3, stroke_color="#0078D4",
+                                background_image=_bg_pil,
+                                initial_drawing=_dd,
+                                update_streamlit=True, height=_disp_h, width=_DISP_W,
+                                drawing_mode="transform", key=f"canvas_s3_{_pn}",
+                            )
+                            if canvas_result.json_data is not None:
+                                objs = [o for o in canvas_result.json_data.get("objects", []) if o.get("type") == "rect"]
+                                st.caption(f"📐 {len(objs)} bbox(es) on canvas")
+                            if st.button("✅ Apply Changes", key=f"s3_apply_{_pn}", type="primary", use_container_width=True):
+                                if canvas_result.json_data is not None:
+                                    objs = [o for o in canvas_result.json_data.get("objects", []) if o.get("type") == "rect"]
+                                    for ci, obj in enumerate(objs[:len(_name_order)]):
+                                        lft = obj.get("left", 0); top_v = obj.get("top", 0)
+                                        w = obj.get("width", 0) * obj.get("scaleX", 1)
+                                        h = obj.get("height", 0) * obj.get("scaleY", 1)
+                                        x1 = max(0, int(lft / _scale)); y1 = max(0, int(top_v / _scale))
+                                        x2 = min(_w_orig, int((lft + w) / _scale)); y2 = min(_h_orig, int((top_v + h) / _scale))
+                                        nm = _name_order[ci]
+                                        if nm in _matches and _matches[nm]:
+                                            _matches[nm]["bbox"] = (x1, y1, x2, y2)
+                                    _mbp[_pn] = _matches
+                                    _ss("matches_by_page", _mbp)
+                                    st.session_state.pop(_bg_key, None)
+                                    st.rerun()
+                        return _canvas_s3_fragment
+
+                    _make_s3_fragment(pn, default_s3, scale_s3, w_orig, h_orig, disp_h_s3,
+                                     names, name_order_s3, matches, nbp, mbp, _s3_bg_key, DISP_W_S3)()
+                    _canvas_s3_ok = True
+                  except Exception as _e3:
+                    import traceback; traceback.print_exc()
+                    st.error(f"Canvas error: {_e3}")
+                    _canvas_s3_ok = False
+                # Fallback: name list with text editing (always show for add/delete)
+                st.markdown("---")
+                st.markdown("**Panel Names**")
                 for i,name in enumerate(list(names)):
                     m=matches.get(name); bbox=m.get("bbox") if m else None
                     conf=m.get("confidence",0) if m else 0; method=m.get("method","—") if m else "—"
-                    with st.expander(f"**{name}** — {method} conf={conf:.2f}"+ (f" bbox={bbox}" if bbox else " (no bbox)"),expanded=False):
-                        nn=st.text_input("Name",value=name,key=f"n3_{pn}_{i}")
+                    col_nm, col_del = st.columns([5, 1])
+                    with col_nm:
+                        nn=st.text_input(f"{name}", value=name, key=f"n3_{pn}_{i}", label_visibility="collapsed")
                         if nn!=name:
                             ni=names.index(name); names[ni]=nn
                             if name in matches: matches[nn]=matches.pop(name)
                             nbp[pn]=names; mbp[pn]=matches
                             _ss("names_by_page",nbp); _ss("matches_by_page",mbp)
-                        if bbox:
-                            bc=st.columns(4)
-                            bx1=bc[0].number_input("x1",value=bbox[0],key=f"nb3_{pn}_{i}_x1",step=1)
-                            by1=bc[1].number_input("y1",value=bbox[1],key=f"nb3_{pn}_{i}_y1",step=1)
-                            bx2=bc[2].number_input("x2",value=bbox[2],key=f"nb3_{pn}_{i}_x2",step=1)
-                            by2=bc[3].number_input("y2",value=bbox[3],key=f"nb3_{pn}_{i}_y2",step=1)
-                            nb=[int(bx1),int(by1),int(bx2),int(by2)]
-                            if nb!=list(bbox): matches[name]["bbox"]=tuple(nb); mbp[pn]=matches; _ss("matches_by_page",mbp)
-                        if st.button("Delete",key=f"nd3_{pn}_{i}"):
+                    with col_del:
+                        if st.button("🗑", key=f"nd3_{pn}_{i}"):
                             rm=names.pop(i); matches.pop(rm,None)
                             nbp[pn]=names; mbp[pn]=matches
                             _ss("names_by_page",nbp); _ss("matches_by_page",mbp); st.rerun()
-                with st.expander("Add Name",expanded=False):
+                with st.expander("➕ Add Name",expanded=False):
                     nn=st.text_input("New name",key=f"nn3_{pn}")
                     if st.button("Add",key=f"na3_{pn}") and nn:
                         names.append(nn); matches[nn]=None

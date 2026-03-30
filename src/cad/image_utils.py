@@ -88,15 +88,20 @@ def file_to_data_url(path: Path) -> str:
     return f"data:image/png;base64,{encoded}"
 
 
-def image_to_data_url(image: np.ndarray) -> str:
-    """Convert an OpenCV BGR ndarray to a base64 PNG data URL.
+def image_to_data_url(image: np.ndarray, max_dim: int = 2048, quality: int = 85) -> str:
+    """Convert an OpenCV BGR ndarray to a base64 JPEG data URL for LLM input.
 
-    Converts BGR→RGB before encoding so GPT receives correct colors.
+    Downscales to max_dim on the longest side (GPT does this internally anyway)
+    and encodes as JPEG for 5-10x smaller payloads vs PNG.
     """
+    h, w = image.shape[:2]
+    if max(h, w) > max_dim:
+        scale = max_dim / max(h, w)
+        image = cv2.resize(image, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
     rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    _, buffer = cv2.imencode(".png", rgb_image)
+    _, buffer = cv2.imencode(".jpg", rgb_image, [cv2.IMWRITE_JPEG_QUALITY, quality])
     encoded = base64.b64encode(buffer.tobytes()).decode("utf-8")
-    return f"data:image/png;base64,{encoded}"
+    return f"data:image/jpeg;base64,{encoded}"
 
 
 def image_to_data_url_with_grid(

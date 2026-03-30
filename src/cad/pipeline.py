@@ -354,7 +354,7 @@ def postprocess_crops(
                     x1, y1, x2, y2 = clipped
                     cropped_img = base_img[y1:y2, x1:x2]
                     if cropped_img.size > 0 and crop.image_path:
-                        cv2.imwrite(str(crop.image_path), cropped_img, [cv2.IMWRITE_PNG_COMPRESSION, 9])
+                        cv2.imwrite(str(crop.image_path), cropped_img, [cv2.IMWRITE_PNG_COMPRESSION, 1])
                     if crop.coords_path:
                         write_polygon_txt(crop.coords_path, new_poly)
                     print(f"  [Page {page_num}] Crop {crop.index}: clipped {box} -> {clipped}")
@@ -623,7 +623,7 @@ def append_new_crops(
             continue
         idx = start_idx + offset
         dest_path = _output_crop_image_path(crops_root, page_num, idx)
-        cv2.imwrite(str(dest_path), cropped, [cv2.IMWRITE_PNG_COMPRESSION, 9])
+        cv2.imwrite(str(dest_path), cropped, [cv2.IMWRITE_PNG_COMPRESSION, 1])
         coords_path = _output_crop_txt_path(crops_root, page_num, idx)
         write_polygon_txt(coords_path, polygon)
         bbox = polygon_to_bbox(polygon, (w, h), 0)
@@ -683,13 +683,13 @@ def write_overlays(
     print(f"  [write_overlays] Page {page_num}: DPI={page_dpi}, image_shape={base_image.shape if base_image is not None else 'MISSING'}")
     overall = draw_overlay(base_image, polygons)
     overall_path = _output_overall_overlay_path(crops_root, page_num, overall_index)
-    cv2.imwrite(str(overall_path), overall, [cv2.IMWRITE_PNG_COMPRESSION, 9])
+    cv2.imwrite(str(overall_path), overall, [cv2.IMWRITE_PNG_COMPRESSION, 1])
     for crop in crops:
         if not crop.polygon:
             continue
         overlay = draw_overlay(base_image, [crop.polygon])
         overlay_path = _output_overlay_path(crops_root, page_num, crop.index)
-        cv2.imwrite(str(overlay_path), overlay, [cv2.IMWRITE_PNG_COMPRESSION, 9])
+        cv2.imwrite(str(overlay_path), overlay, [cv2.IMWRITE_PNG_COMPRESSION, 1])
     return overall_path
 
 
@@ -777,7 +777,7 @@ def verify_and_refine_new_crops(
             overlay_path = _output_iteration_overlay_path(
                 crops_temp_root, page_num, crop.index, iteration
             )
-            cv2.imwrite(str(overlay_path), overlay_debug, [cv2.IMWRITE_PNG_COMPRESSION, 9])
+            cv2.imwrite(str(overlay_path), overlay_debug, [cv2.IMWRITE_PNG_COMPRESSION, 1])
 
             corrected, issue, vrf_elapsed = verify_crop_with_llm(
                 client, deployment, base_image, current_polygon,
@@ -816,14 +816,14 @@ def verify_and_refine_new_crops(
             )
             cropped = crop_polygon(save_base, current_polygon)
             if cropped is not None:
-                cv2.imwrite(str(iter_path), cropped, [cv2.IMWRITE_PNG_COMPRESSION, 9])
+                cv2.imwrite(str(iter_path), cropped, [cv2.IMWRITE_PNG_COMPRESSION, 1])
 
             # Update temp files
             temp_path = _output_crop_image_path(crops_temp_root, page_num, crop.index)
             temp_coords = _output_crop_txt_path(crops_temp_root, page_num, crop.index)
             temp_path.parent.mkdir(parents=True, exist_ok=True)
             if cropped is not None:
-                cv2.imwrite(str(temp_path), cropped, [cv2.IMWRITE_PNG_COMPRESSION, 9])
+                cv2.imwrite(str(temp_path), cropped, [cv2.IMWRITE_PNG_COMPRESSION, 1])
             write_polygon_txt(temp_coords, current_polygon)
 
         if rejected:
@@ -836,7 +836,7 @@ def verify_and_refine_new_crops(
         )
         final_cropped = crop_polygon(save_base, current_polygon)
         if final_cropped is not None:
-            cv2.imwrite(str(final_path), final_cropped, [cv2.IMWRITE_PNG_COMPRESSION, 9])
+            cv2.imwrite(str(final_path), final_cropped, [cv2.IMWRITE_PNG_COMPRESSION, 1])
 
         crop.polygon = current_polygon
         crop.bbox = polygon_to_bbox(current_polygon, (w_img, h_img), 0)
@@ -881,7 +881,7 @@ def _apply_content_crop_to_page(crops_root: Path, page_num: int) -> List[str]:
             continue  # no frame detected
 
         print(f"  [crop] {img_path.name}  {w}x{h} → ({x1},{y1})-({x2},{y2}) = {x2-x1}x{y2-y1}")
-        cv2.imwrite(str(img_path), img[y1:y2, x1:x2], [cv2.IMWRITE_PNG_COMPRESSION, 9])
+        cv2.imwrite(str(img_path), img[y1:y2, x1:x2], [cv2.IMWRITE_PNG_COMPRESSION, 1])
 
         # Apply same crop to overlay images
         stem = img_path.stem  # e.g. 'image_2_1'
@@ -890,7 +890,7 @@ def _apply_content_crop_to_page(crops_root: Path, page_num: int) -> List[str]:
             for ov_path in page_dir.glob(pattern):
                 ov = cv2.imread(str(ov_path))
                 if ov is not None and ov.shape[:2] == (h, w):
-                    cv2.imwrite(str(ov_path), ov[y1:y2, x1:x2], [cv2.IMWRITE_PNG_COMPRESSION, 9])
+                    cv2.imwrite(str(ov_path), ov[y1:y2, x1:x2], [cv2.IMWRITE_PNG_COMPRESSION, 1])
 
         # Update .txt polygon — coordinates must stay in full-page pixel space.
         # x1,y1,x2,y2 are crop-local; recover the original full-page origin from
@@ -951,7 +951,7 @@ def _regenerate_di_overlay(output_root: Path, page_num: int, crops: List[ImageCr
     for crop in crops:
         if crop.polygon:
             draw_polygon(overlay_img, crop.polygon, hex_to_bgr("#f97316"), 10)
-    cv2.imwrite(str(overlay_path), overlay_img, [cv2.IMWRITE_PNG_COMPRESSION, 9])
+    cv2.imwrite(str(overlay_path), overlay_img, [cv2.IMWRITE_PNG_COMPRESSION, 1])
 
 
 def verify_di_crops(
@@ -1029,8 +1029,8 @@ def verify_di_crops(
         # ── Save debug images for this LLM call ──────────────────────────────
         _dbg_dir = output_root / f"page{page_num}" / "images" / "debug_crop_check"
         _dbg_dir.mkdir(parents=True, exist_ok=True)
-        cv2.imwrite(str(_dbg_dir / f"crop{crop.index:02d}_iter00_overlay.png"), page_overlay_img, [cv2.IMWRITE_PNG_COMPRESSION, 9])
-        cv2.imwrite(str(_dbg_dir / f"crop{crop.index:02d}_iter00_crop.png"), crop_img, [cv2.IMWRITE_PNG_COMPRESSION, 9])
+        cv2.imwrite(str(_dbg_dir / f"crop{crop.index:02d}_iter00_overlay.png"), page_overlay_img, [cv2.IMWRITE_PNG_COMPRESSION, 1])
+        cv2.imwrite(str(_dbg_dir / f"crop{crop.index:02d}_iter00_crop.png"), crop_img, [cv2.IMWRITE_PNG_COMPRESSION, 1])
 
         # ── Initial clipping check ────────────────────────────────────────────
         t0 = _time.time()
@@ -1135,7 +1135,7 @@ def verify_di_crops(
             # Save directly from the raw page image with no whitefill.
             new_crop_img = crop_polygon(base_img, corrected)
             if new_crop_img is not None and crop.image_path:
-                cv2.imwrite(str(crop.image_path), new_crop_img, [cv2.IMWRITE_PNG_COMPRESSION, 9])
+                cv2.imwrite(str(crop.image_path), new_crop_img, [cv2.IMWRITE_PNG_COMPRESSION, 1])
                 crop_img = new_crop_img
             if crop.coords_path:
                 write_polygon_txt(crop.coords_path, corrected)
@@ -1149,8 +1149,8 @@ def verify_di_crops(
             fix_total_time += elapsed
 
             # Save debug images for re-check
-            cv2.imwrite(str(_dbg_dir / f"crop{crop.index:02d}_iter{fix_iterations:02d}_overlay.png"), page_overlay_img, [cv2.IMWRITE_PNG_COMPRESSION, 9])
-            cv2.imwrite(str(_dbg_dir / f"crop{crop.index:02d}_iter{fix_iterations:02d}_crop.png"), crop_img, [cv2.IMWRITE_PNG_COMPRESSION, 9])
+            cv2.imwrite(str(_dbg_dir / f"crop{crop.index:02d}_iter{fix_iterations:02d}_overlay.png"), page_overlay_img, [cv2.IMWRITE_PNG_COMPRESSION, 1])
+            cv2.imwrite(str(_dbg_dir / f"crop{crop.index:02d}_iter{fix_iterations:02d}_crop.png"), crop_img, [cv2.IMWRITE_PNG_COMPRESSION, 1])
 
             # Re-check clipping with updated crop + overlay
             t2 = _time.time()
