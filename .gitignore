@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environment
+venv/
+.venv/
+
+# Environment & secrets
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project outputs (generated at runtime)
+outputs/
+checkpoints/
+
+# Customer-specific test data (not for distribution)
+data/test.pdf
+data/h_test.pdf
+
+# Copilot custom agents (workspace-specific)
+.github/agents/
+.github/skills/
+.github/prompts/
+
+# Lock file (users regenerate via pip freeze)
+# requirements.lock.txt is kept for reproducibility

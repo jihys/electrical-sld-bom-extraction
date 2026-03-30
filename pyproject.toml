@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "electrical-sld-bom-extraction"
+version = "0.1.0"
+description = "Agentic CAD panel extraction system with Human-in-the-Loop"
+requires-python = ">=3.10"
+dependencies = [
+    # Microsoft Agent Framework
+    "agent-framework-core>=1.0.0rc1",
+    # Azure AI
+    "azure-ai-documentintelligence>=1.0.0",
+    "azure-identity>=1.15.0",
+    "openai>=1.50.0",
+    # Image / PDF processing
+    "PyMuPDF>=1.24.0",
+    "opencv-python>=4.10.0",
+    "numpy>=1.24.0",
+    "Pillow>=10.0.0",
+    "matplotlib>=3.8.0",
+    # Web / HITL
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.29.0",
+    "gradio>=4.20.0",
+    "streamlit>=1.30.0",
+    # Core
+    "pydantic>=2.5.0",
+    "pydantic-settings>=2.1.0",
+    "python-dotenv>=1.0.0",
+    "python-multipart>=0.0.7",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0.0", "pytest-asyncio>=0.23.0", "httpx>=0.27.0"]
+
+[tool.setuptools.packages.find]
+include = ["src*"]

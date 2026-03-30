@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CAD Panel Extraction</title>
+  <style>
+    :root {
+      --primary: #2563eb;
+      --primary-hover: #1d4ed8;
+      --success: #16a34a;
+      --warning: #ea580c;
+      --danger: #dc2626;
+      --bg: #f8fafc;
+      --card: #ffffff;
+      --border: #e2e8f0;
+      --text: #1e293b;
+      --text-secondary: #64748b;
+      --radius: 12px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    /* ── Header ─────────────────────── */
+    .header {
+      background: linear-gradient(135deg, #1e3a5f 0%, #2563eb 100%);
+      color: white;
+      padding: 24px 32px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+    }
+    .header svg { width: 36px; height: 36px; flex-shrink: 0; }
+    .header h1 { font-size: 22px; font-weight: 600; }
+    .header p { font-size: 13px; opacity: 0.85; margin-top: 2px; }
+    .header-right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+    .status-dot { width: 10px; height: 10px; border-radius: 50%; background: #4ade80; }
+    .status-label { font-size: 13px; opacity: 0.9; }
+
+    /* ── Layout ─────────────────────── */
+    .container { max-width: 1100px; margin: 0 auto; padding: 32px 24px; }
+
+    /* ── Upload Card ────────────────── */
+    .upload-card {
+      background: var(--card);
+      border: 2px dashed var(--border);
+      border-radius: var(--radius);
+      padding: 48px;
+      text-align: center;
+      transition: border-color 0.2s, background 0.2s;
+      cursor: pointer;
+      position: relative;
+    }
+    .upload-card:hover, .upload-card.dragover {
+      border-color: var(--primary);
+      background: #eff6ff;
+    }
+    .upload-card input[type="file"] {
+      position: absolute; inset: 0; opacity: 0; cursor: pointer;
+    }
+    .upload-icon { font-size: 48px; margin-bottom: 12px; }
+    .upload-card h2 { font-size: 18px; margin-bottom: 6px; }
+    .upload-card p { color: var(--text-secondary); font-size: 14px; }
+
+    /* ── Buttons ────────────────────── */
+    .btn {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 10px 20px;
+      border: none; border-radius: 8px;
+      font-size: 14px; font-weight: 500;
+      cursor: pointer; transition: all 0.15s;
+    }
+    .btn-primary { background: var(--primary); color: white; }
+    .btn-primary:hover { background: var(--primary-hover); }
+    .btn-primary:disabled { background: #94a3b8; cursor: not-allowed; }
+    .btn-sm { padding: 6px 14px; font-size: 13px; }
+
+    /* ── Selected file bar ──────────── */
+    .file-bar {
+      display: none;
+      align-items: center; gap: 12px;
+      background: #eff6ff;
+      border: 1px solid #bfdbfe;
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 16px;
+    }
+    .file-bar.visible { display: flex; }
+    .file-bar .name { font-weight: 500; flex: 1; }
+    .file-bar .size { color: var(--text-secondary); font-size: 13px; }
+
+    /* ── Runs section ───────────────── */
+    .section-title {
+      font-size: 16px; font-weight: 600;
+      margin: 32px 0 16px; display: flex;
+      align-items: center; gap: 8px;
+    }
+
+    .runs-list { display: flex; flex-direction: column; gap: 12px; }
+
+    .run-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px 24px;
+      display: flex;
+      align-items: center; gap: 16px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+      transition: box-shadow 0.15s;
+    }
+    .run-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
+
+    .run-icon {
+      width: 44px; height: 44px;
+      border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 20px; flex-shrink: 0;
+    }
+    .run-icon.running { background: #dbeafe; }
+    .run-icon.completed { background: #dcfce7; }
+    .run-icon.failed { background: #fee2e2; }
+    .run-icon.waiting { background: #fff7ed; }
+
+    .run-details { flex: 1; }
+    .run-id { font-weight: 600; font-size: 15px; }
+    .run-file { color: var(--text-secondary); font-size: 13px; margin-top: 2px; }
+
+    .badge {
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 12px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.5px;
+    }
+    .badge-running { background: #dbeafe; color: #1d4ed8; }
+    .badge-started { background: #dbeafe; color: #1d4ed8; }
+    .badge-completed { background: #dcfce7; color: #15803d; }
+    .badge-failed { background: #fee2e2; color: #dc2626; }
+    .badge-waiting_for_human { background: #fff7ed; color: #c2410c; }
+
+    /* ── Progress animation ─────────── */
+    .spinner {
+      width: 20px; height: 20px;
+      border: 3px solid var(--border);
+      border-top-color: var(--primary);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Empty state ────────────────── */
+    .empty-state {
+      text-align: center; padding: 40px;
+      color: var(--text-secondary); font-size: 14px;
+    }
+
+    /* ── Links row ──────────────────── */
+    .links-row {
+      display: flex; gap: 12px; margin-top: 32px; flex-wrap: wrap;
+    }
+    .link-card {
+      flex: 1; min-width: 200px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px 20px;
+      text-decoration: none; color: var(--text);
+      display: flex; align-items: center; gap: 12px;
+      transition: box-shadow 0.15s, border-color 0.15s;
+    }
+    .link-card:hover { border-color: var(--primary); box-shadow: 0 4px 12px rgba(37,99,235,0.1); }
+    .link-card .icon { font-size: 24px; }
+    .link-card .label { font-weight: 500; font-size: 14px; }
+    .link-card .desc { font-size: 12px; color: var(--text-secondary); }
+
+    /* ── Toast ──────────────────────── */
+    .toast {
+      position: fixed; bottom: 24px; right: 24px;
+      background: var(--text); color: white;
+      padding: 12px 20px; border-radius: 8px;
+      font-size: 14px; z-index: 1000;
+      transform: translateY(80px); opacity: 0;
+      transition: all 0.3s;
+    }
+    .toast.show { transform: translateY(0); opacity: 1; }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <div class="header">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <rect x="2" y="3" width="20" height="18" rx="2"/>
+      <line x1="8" y1="7" x2="16" y2="7"/>
+      <line x1="8" y1="11" x2="16" y2="11"/>
+      <line x1="8" y1="15" x2="12" y2="15"/>
+    </svg>
+    <div>
+      <h1>CAD Panel Extraction</h1>
+      <p>Agentic Multi-Stage Pipeline &middot; Microsoft Agent Framework</p>
+    </div>
+    <div class="header-right">
+      <div class="status-dot" id="serverDot"></div>
+      <span class="status-label" id="serverStatus">Connected</span>
+    </div>
+  </div>
+
+  <div class="container">
+
+    <!-- Upload -->
+    <div class="upload-card" id="uploadArea">
+      <input type="file" accept=".pdf" id="fileInput" />
+      <div class="upload-icon">📄</div>
+      <h2>PDF 파일을 드래그하거나 클릭하여 업로드</h2>
+      <p>SLD(Single Line Diagram) CAD 도면 PDF를 업로드하면 자동으로 패널 추출이 시작됩니다</p>
+    </div>
+
+    <div class="file-bar" id="fileBar">
+      <span>📎</span>
+      <span class="name" id="fileName"></span>
+      <span class="size" id="fileSize"></span>
+      <button class="btn btn-primary btn-sm" id="startBtn" onclick="uploadFile()">추출 시작</button>
+      <button class="btn btn-sm" style="background:#f1f5f9" onclick="clearFile()">취소</button>
+    </div>
+
+    <!-- Runs -->
+    <div class="section-title">
+      <span>📋</span> 추출 작업 목록
+      <button class="btn btn-sm" style="background:#f1f5f9; margin-left:auto;" onclick="refreshRuns()">새로고침</button>
+    </div>
+
+    <div class="runs-list" id="runsList">
+      <div class="empty-state">아직 추출 작업이 없습니다. PDF를 업로드하여 시작하세요.</div>
+    </div>
+
+    <!-- Quick links -->
+    <div class="links-row">
+      <a class="link-card" href="/gradio" target="_blank">
+        <span class="icon">🖊️</span>
+        <div>
+          <div class="label">HITL Bbox Editor</div>
+          <div class="desc">사람 검토가 필요한 패널 수정</div>
+        </div>
+      </a>
+      <a class="link-card" href="/docs" target="_blank">
+        <span class="icon">📡</span>
+        <div>
+          <div class="label">API Documentation</div>
+          <div class="desc">Swagger UI — REST API 테스트</div>
+        </div>
+      </a>
+      <a class="link-card" href="/health" target="_blank">
+        <span class="icon">💚</span>
+        <div>
+          <div class="label">Health Check</div>
+          <div class="desc">서버 상태 확인</div>
+        </div>
+      </a>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+<script>
+const fileInput = document.getElementById('fileInput');
+const uploadArea = document.getElementById('uploadArea');
+const fileBar = document.getElementById('fileBar');
+const runsList = document.getElementById('runsList');
+let selectedFile = null;
+let runs = [];     // {run_id, status, filename}
+let pollTimers = {};
+
+// ── Drag & drop ──
+uploadArea.addEventListener('dragover', e => { e.preventDefault(); uploadArea.classList.add('dragover'); });
+uploadArea.addEventListener('dragleave', () => uploadArea.classList.remove('dragover'));
+uploadArea.addEventListener('drop', e => {
+  e.preventDefault();
+  uploadArea.classList.remove('dragover');
+  if (e.dataTransfer.files.length) selectFile(e.dataTransfer.files[0]);
+});
+
+fileInput.addEventListener('change', () => {
+  if (fileInput.files.length) selectFile(fileInput.files[0]);
+});
+
+function selectFile(file) {
+  if (!file.name.toLowerCase().endsWith('.pdf')) {
+    showToast('PDF 파일만 업로드할 수 있습니다');
+    return;
+  }
+  selectedFile = file;
+  document.getElementById('fileName').textContent = file.name;
+  document.getElementById('fileSize').textContent = formatSize(file.size);
+  fileBar.classList.add('visible');
+}
+
+function clearFile() {
+  selectedFile = null;
+  fileInput.value = '';
+  fileBar.classList.remove('visible');
+}
+
+async function uploadFile() {
+  if (!selectedFile) return;
+  const btn = document.getElementById('startBtn');
+  btn.disabled = true;
+  btn.textContent = '업로드 중...';
+
+  const form = new FormData();
+  form.append('file', selectedFile);
+
+  try {
+    const res = await fetch('/api/upload', { method: 'POST', body: form });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || res.statusText);
+    }
+    const data = await res.json();
+    runs.unshift({ run_id: data.run_id, status: data.status, filename: selectedFile.name });
+    renderRuns();
+    startPolling(data.run_id);
+    showToast(`추출 시작됨 — Run ID: ${data.run_id}`);
+    clearFile();
+  } catch (e) {
+    showToast('업로드 실패: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '추출 시작';
+  }
+}
+
+function startPolling(runId) {
+  if (pollTimers[runId]) return;
+  pollTimers[runId] = setInterval(async () => {
+    try {
+      const res = await fetch(`/api/run/${runId}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const run = runs.find(r => r.run_id === runId);
+      if (run) {
+        run.status = data.status;
+        if (data.detail) run.detail = data.detail;
+        renderRuns();
+      }
+      if (data.status === 'completed' || data.status === 'failed') {
+        if (data.status === 'failed' && data.detail) {
+          showToast(`실패: ${data.detail.substring(0, 100)}`);
+        }
+        clearInterval(pollTimers[runId]);
+        delete pollTimers[runId];
+      }
+    } catch (_) {}
+  }, 3000);
+}
+
+function renderRuns() {
+  if (runs.length === 0) {
+    runsList.innerHTML = '<div class="empty-state">아직 추출 작업이 없습니다. PDF를 업로드하여 시작하세요.</div>';
+    return;
+  }
+  runsList.innerHTML = runs.map(r => {
+    const iconClass = r.status === 'completed' ? 'completed'
+      : r.status === 'failed' ? 'failed'
+      : r.status === 'waiting_for_human' ? 'waiting'
+      : 'running';
+    const icon = r.status === 'completed' ? '✅'
+      : r.status === 'failed' ? '❌'
+      : r.status === 'waiting_for_human' ? '🖐️'
+      : '⚙️';
+    const statusLabel = r.status === 'completed' ? 'Completed'
+      : r.status === 'failed' ? 'Failed'
+      : r.status === 'waiting_for_human' ? 'Waiting for Human'
+      : r.status === 'started' ? 'Starting...'
+      : 'Running';
+    const actions = r.status === 'completed'
+      ? `<button class="btn btn-sm btn-primary" onclick="viewResult('${r.run_id}')">결과 보기</button>`
+      : r.status === 'waiting_for_human'
+      ? `<a class="btn btn-sm" style="background:#fff7ed;color:#c2410c;text-decoration:none" href="/gradio" target="_blank">리뷰 하기</a>`
+      : r.status === 'failed'
+      ? ''
+      : `<div class="spinner"></div>`;
+    const detailHtml = r.detail
+      ? `<div class="run-file" style="color:#dc2626;margin-top:2px" title="${r.detail.replace(/"/g,'&quot;')}">${r.detail.substring(0, 80)}${r.detail.length > 80 ? '...' : ''}</div>`
+      : '';
+    return `
+      <div class="run-card">
+        <div class="run-icon ${iconClass}">${icon}</div>
+        <div class="run-details">
+          <div class="run-id">${r.run_id}</div>
+          <div class="run-file">${r.filename || 'N/A'}</div>
+          ${detailHtml}
+        </div>
+        <span class="badge badge-${r.status}">${statusLabel}</span>
+        ${actions}
+      </div>`;
+  }).join('');
+}
+
+async function viewResult(runId) {
+  try {
+    const res = await fetch(`/api/results/${runId}`);
+    if (!res.ok) { showToast('결과가 아직 준비되지 않았습니다'); return; }
+    const data = await res.json();
+    const w = window.open('', '_blank');
+    w.document.write(`<html><head><title>Result ${runId}</title>
+      <style>body{font-family:monospace;padding:24px;background:#f8fafc}pre{background:#fff;padding:20px;border-radius:8px;border:1px solid #e2e8f0;overflow:auto}</style>
+      </head><body><h2>Run ${runId} — Results</h2><pre>${JSON.stringify(data, null, 2)}</pre></body></html>`);
+  } catch (e) {
+    showToast('결과 로드 실패');
+  }
+}
+
+async function refreshRuns() {
+  for (const r of runs) {
+    if (r.status !== 'completed' && r.status !== 'failed') {
+      try {
+        const res = await fetch(`/api/run/${r.run_id}`);
+        if (res.ok) { const d = await res.json(); r.status = d.status; }
+      } catch (_) {}
+    }
+  }
+  renderRuns();
+  showToast('새로고침 완료');
+}
+
+// ── Health ping ──
+async function checkHealth() {
+  try {
+    const res = await fetch('/health');
+    const ok = res.ok;
+    document.getElementById('serverDot').style.background = ok ? '#4ade80' : '#f87171';
+    document.getElementById('serverStatus').textContent = ok ? 'Connected' : 'Disconnected';
+  } catch (_) {
+    document.getElementById('serverDot').style.background = '#f87171';
+    document.getElementById('serverStatus').textContent = 'Disconnected';
+  }
+}
+setInterval(checkHealth, 15000);
+checkHealth();
+
+// ── Helpers ──
+function formatSize(b) {
+  if (b < 1024) return b + ' B';
+  if (b < 1048576) return (b/1024).toFixed(1) + ' KB';
+  return (b/1048576).toFixed(1) + ' MB';
+}
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 3000);
+}
+</script>
+</body>
+</html>
