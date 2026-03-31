@@ -584,7 +584,7 @@ def responses_call(
                 "role": "user",
                 "content": [
                     {"type": "input_text", "text": full_prompt},
-                    {"type": "input_image", "image_url": image_to_data_url(send_img)},
+                    {"type": "input_image", "image_url": image_to_data_url(send_img), "detail": "original"},
                 ],
             }
         ],
@@ -610,7 +610,7 @@ def responses_call_with_image(
     images: List[np.ndarray] = [image] if isinstance(image, np.ndarray) else image
     content: List[Dict] = [{"type": "input_text", "text": prompt}]
     for img in images:
-        content.append({"type": "input_image", "image_url": image_to_data_url(img)})
+        content.append({"type": "input_image", "image_url": image_to_data_url(img), "detail": "original"})
     t0 = time.time()
     response = client.responses.create(
         model=deployment,
@@ -647,7 +647,7 @@ def recheck_is_circuit_diagram(
     )
     content: List[Dict] = [
         {"type": "input_text", "text": prompt},
-        {"type": "input_image", "image_url": image_to_data_url(crop_image)},
+        {"type": "input_image", "image_url": image_to_data_url(crop_image), "detail": "original"},
     ]
     response = client.responses.create(
         model=deployment,
@@ -759,8 +759,8 @@ def check_di_crop(
     )
     content: List[Dict] = [
         {"type": "input_text", "text": prompt},
-        {"type": "input_image", "image_url": image_to_data_url(page_overlay_img)},
-        {"type": "input_image", "image_url": image_to_data_url(crop_image)},
+        {"type": "input_image", "image_url": image_to_data_url(page_overlay_img), "detail": "original"},
+        {"type": "input_image", "image_url": image_to_data_url(crop_image), "detail": "original"},
     ]
     response = client.responses.create(
         model=deployment,

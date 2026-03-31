@@ -88,16 +88,27 @@ def file_to_data_url(path: Path) -> str:
     return f"data:image/png;base64,{encoded}"
 
 
-def image_to_data_url(image: np.ndarray, max_dim: int = 2048) -> str:
+def image_to_data_url(
+    image: np.ndarray,
+    max_dim: int = 6000,
+    max_pixels: int = 10_240_000,
+) -> str:
     """Convert an OpenCV BGR ndarray to a base64 PNG data URL for LLM input.
 
-    Downscales to max_dim on the longest side (GPT does this internally anyway)
-    to reduce transfer size without quality loss.
+    GPT-5.4 'original' detail supports up to 6000px max dimension and
+    10.24M total pixels (whichever is lower).  Downscales only when the
+    image exceeds either limit — preserving full fidelity for CAD diagrams.
     """
     h, w = image.shape[:2]
+    scale = 1.0
     if max(h, w) > max_dim:
-        scale = max_dim / max(h, w)
-        image = cv2.resize(image, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
+        scale = min(scale, max_dim / max(h, w))
+    if h * w > max_pixels:
+        scale = min(scale, (max_pixels / (h * w)) ** 0.5)
+    if scale < 1.0:
+        image = cv2.resize(
+            image, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA
+        )
     rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     _, buffer = cv2.imencode(".png", rgb_image)
     encoded = base64.b64encode(buffer.tobytes()).decode("utf-8")

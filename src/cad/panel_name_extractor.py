@@ -129,7 +129,7 @@ def _call_llm(
 ) -> str:
     content: List[dict] = [{"type": "input_text", "text": prompt}]
     for url in image_urls:
-        content.append({"type": "input_image", "image_url": url})
+        content.append({"type": "input_image", "image_url": url, "detail": "original"})
     t0 = time.time()
     tag = f" [{label}]" if label else ""
     print(f"  LLM{tag} calling...", end=" ", flush=True)

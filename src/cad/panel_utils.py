@@ -78,7 +78,7 @@ def call_llm(
 ) -> str:
     content = [{"type": "input_text", "text": prompt}]
     for im in images:
-        content.append({"type": "input_image", "image_url": _img_to_data_url(im)})
+        content.append({"type": "input_image", "image_url": _img_to_data_url(im), "detail": "original"})
 
     t0 = time.time()
     tag = f"[{label}]" if label else ""

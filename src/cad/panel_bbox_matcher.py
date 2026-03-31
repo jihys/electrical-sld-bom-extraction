@@ -581,7 +581,7 @@ def _llm_call_batch(
     if img_b64:
         content.append({
             "type": "image_url",
-            "image_url": {"url": f"data:image/jpeg;base64,{img_b64}", "detail": "high"},
+            "image_url": {"url": f"data:image/jpeg;base64,{img_b64}", "detail": "original"},
         })
     import time as _time
     _t0 = _time.time()

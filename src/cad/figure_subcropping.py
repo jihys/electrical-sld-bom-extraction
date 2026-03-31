@@ -321,7 +321,7 @@ def llm_compute_tiles(
             "role": "user",
             "content": [
                 {"type": "input_text",  "text": prompt},
-                {"type": "input_image", "image_url": _img_to_data_url(grid_img)},
+                {"type": "input_image", "image_url": _img_to_data_url(grid_img), "detail": "original"},
             ],
         }],
         **{"reasoning": {"effort": reasoning_effort}} if reasoning_effort else {"temperature": 0},
@@ -596,7 +596,7 @@ def _llm_check_cut(
             'role': 'user',
             'content': [
                 {'type': 'input_text',  'text': prompt},
-                {'type': 'input_image', 'image_url': data_url},
+                {'type': 'input_image', 'image_url': data_url, 'detail': 'original'},
             ],
         }],
         temperature=0,
