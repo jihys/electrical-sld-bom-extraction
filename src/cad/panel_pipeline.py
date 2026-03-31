@@ -730,6 +730,10 @@ def process_all_panels_batch(
         for r in results:
             bx = r['bbox']
             mask[bx[1]:bx[3], bx[0]:bx[2]] = 1
+            # Subtract exclude_regions from coverage mask
+            for ex in r.get('exclude_regions', []):
+                ex1, ey1, ex2, ey2 = ex
+                mask[ey1:ey2, ex1:ex2] = 0
         covered_px = int(np.sum(mask))
         total_px = w * h
         coverage_pct = covered_px / total_px * 100

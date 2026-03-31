@@ -280,12 +280,54 @@ Panel names: {names_str}
 [Input image]
 - The image shows the full crop with ALL panel name locations marked as blue "NAME:panel_name" boxes.
 
+[STEP 0] FIRST — systematic boundary line analysis (MANDATORY)
+Before locating any individual panel, you MUST perform this analysis:
+
+(0-A) Identify all HORIZONTAL row-divider lines.
+  These are long horizontal lines (dashed or solid) that span across multiple panels,
+  creating horizontal "rows" of panels in the drawing.
+
+(0-B) Identify all VERTICAL column-divider lines between horizontally adjacent panels.
+  For each pair of side-by-side panels in the same row, find the vertical line(s) separating them.
+  IMPORTANT: there may be MORE THAN ONE vertical divider line between two adjacent panels,
+  each covering a different y-range. Look carefully!
+
+(0-C) ★ L-SHAPE DIAGNOSTIC TEST (two independent checks) ★
+
+  CHECK 1 — Name label position offset:
+    For adjacent panels in the same row or column, compare the positions of their
+    NAME boxes (the blue "NAME:xxx" labels in the image).
+    (a) Horizontally adjacent panels: if their NAME boxes have significantly different
+        y-positions (difference > {grid_size} pixels), this is a STRONG indicator of
+        an L-shaped boundary. The panel whose name is HIGHER (smaller y) occupies a
+        wider upper region; the one whose name is LOWER (larger y) occupies a wider
+        lower region. The boundary shifts near the LOWER panel's name y-coordinate.
+    (b) Vertically adjacent panels: if their NAME boxes have significantly different
+        x-positions (difference > {grid_size} pixels), this similarly indicates a
+        non-rectangular split along the x-axis.
+
+  CHECK 2 — Vertical divider length:
+    "Does the vertical divider line between two adjacent panels extend the FULL HEIGHT
+     from one horizontal row-divider to the next?"
+    - If YES → simple rectangles.
+    - If NO → BOTH panels are L-shaped!
+
+  If EITHER check indicates L-shape → treat both adjacent panels as L-shaped.
+
+(0-D) Similarly, check each horizontal divider between vertically stacked panels:
+    "Does this horizontal line extend the FULL WIDTH between the left and right boundaries?"
+  - If NO → the panels above and below have non-rectangular boundaries.
+
+Record your findings in the "reasoning" field for each affected panel.
+
 [STEP 1] For each panel: locate its NAME box → identify its panel boundary
 - Each blue box labeled "NAME:xxx" is the exact text coordinate of panel "xxx".
 - Use that coordinate as reference to find the corresponding panel boundary (solid or dashed box).
 
 [STEP 2] For each panel: independently determine all 4 edges
 !! TOP PRIORITY RULE: each panel's bbox MUST fully contain its corresponding NAME box !!
+!! The panel name label box (hexagon, rectangle, or other shape containing the panel name text)
+   is part of the panel area — the bbox MUST include this label box entirely !!
 !! Adjacent panels must NEVER be encroached upon by another panel's bbox !!
 
 ━━ x1 (left edge): find left boundary, subtract 2~5px. Exclude adjacent panel content.
@@ -296,14 +338,22 @@ Panel names: {names_str}
 ━━ y2 (bottom edge): find bottom boundary, add 2~5px. Exclude adjacent panel content.
 
 [STEP 3] For each panel: handle non-rectangular (L-shaped / ㄱ-shaped) shapes
-- Some panels are NOT simple rectangles — they may be L-shaped, ㄱ-shaped, or other non-rectangular forms.
-- In such cases, the bbox should be the FULL OUTER rectangle that encloses the entire panel region.
-- Then identify the sub-regions within that outer bbox that do NOT belong to this panel
-  (i.e. areas belonging to adjacent panels or empty space outside the panel boundary).
-- Return these as exclude_regions: list of [x1, y1, x2, y2] rectangles (in crop image pixel coordinates).
-- If the panel is a clean rectangle, return exclude_regions: [].
+Use the findings from STEP 0 to determine each panel's shape.
 
-Current information:
+(3-A) If STEP 0 diagnostic found that a vertical divider does NOT span the full row height:
+  - BOTH panels on either side of that divider are L-shaped.
+  - Each panel's bbox = the FULL OUTER rectangle enclosing the entire L-shaped area.
+  - The bboxes of two interlocking L-shaped panels WILL OVERLAP — this is expected and correct.
+  - For each panel, identify the rectangular sub-region within its bbox that belongs to the
+    ADJACENT panel (the overlapping area) and list it in exclude_regions.
+
+(3-B) CRITICAL CONSISTENCY CHECK:
+  - If panel A has exclude_regions, there MUST be an adjacent panel B that also has exclude_regions.
+  - It is IMPOSSIBLE for only one of two interlocking L-shaped panels to have exclude_regions.
+  - The exclude_region of panel A should roughly equal the non-excluded area of panel B that overlaps
+    with panel A's bbox, and vice versa.
+
+(3-C) If the panel is a clean rectangle (all dividers span full row/column), return exclude_regions: [].
 - panel names: {names_str}
 - image size: width={width}, height={height}
 - grid size: {grid_size}px
