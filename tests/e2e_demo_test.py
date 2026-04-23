@@ -32,7 +32,7 @@ except ImportError:
 DEFAULT_BASE_URL = "http://localhost:8501"
 DEFAULT_PDF = "test.pdf"
 DEFAULT_SKIP_PAGES = [1, 2]
-LLM_TIMEOUT = 300_000  # 5 min
+LLM_TIMEOUT = 600_000  # 10 min
 SCREENSHOT_DIR = Path(__file__).resolve().parent.parent / "outputs" / "e2e_screenshots"
 
 
@@ -149,7 +149,7 @@ class StreamlitE2ERunner:
         if stable_count >= 3:
             print(f"  ✅ {step_name} complete")
         else:
-            print(f"  ⚠ Spinner timeout after 5min for {step_name}")
+            print(f"  ⚠ Spinner timeout after 10min for {step_name}")
         self._wait_streamlit_ready()
 
     # ── Step 0: Select PDF ────────────────────────────────────────

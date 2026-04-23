@@ -11,7 +11,7 @@ def add_grid_overlay(img_bgr: np.ndarray, grid_size: int = 120) -> np.ndarray:
     return draw_ruler(img_bgr, step_x=grid_size, step_y=grid_size)
 
 
-def draw_target_bbox(img_bgr: np.ndarray, bbox: List[int], color=(255, 0, 0), label: str = "TARGET") -> np.ndarray:
+def draw_target_bbox(img_bgr: np.ndarray, bbox: List[int], color=(255, 0, 0), label: str = "TARGET", max_font_scale: float = 0.7) -> np.ndarray:
     out = img_bgr.copy()
     h_img, w_img = out.shape[:2]
     x1, y1, x2, y2 = bbox
@@ -26,8 +26,7 @@ def draw_target_bbox(img_bgr: np.ndarray, bbox: List[int], color=(255, 0, 0), la
     bbox_w = max(x2 - x1, 1)
     # Target: rendered text height ≈ 80% of bbox height
     # cv2 FONT_HERSHEY_SIMPLEX at scale=1.0 produces ~22px tall glyphs
-    # Cap at 2.5 so large panel bboxes don't produce enormous text
-    font_scale = min(2.5, max(0.5, (bbox_h * 0.8) / 22.0))
+    font_scale = min(max_font_scale, max(0.5, (bbox_h * 0.8) / 22.0))
     # Cap so the label width doesn't exceed 2x bbox width
     thickness = max(1, int(font_scale * 1.5))
     (tw, th), _ = cv2.getTextSize(display, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness)
@@ -74,10 +73,10 @@ def make_locate_input_image(
     if other_name_bboxes:
         for other_name, other_bbox in other_name_bboxes:
             if other_bbox is not None:
-                out = draw_target_bbox(out, other_bbox, color=(0, 200, 0), label=f"OTHER:{other_name}")
+                out = draw_target_bbox(out, other_bbox, color=(0, 200, 0), label=f"OTHER:{other_name}", max_font_scale=0.7)
     # Blue: target panel name location
     if target_bbox is not None:
-        out = draw_target_bbox(out, target_bbox, color=(255, 0, 0), label=f"NAME:{panel_name}")
+        out = draw_target_bbox(out, target_bbox, color=(255, 0, 0), label="NAME", max_font_scale=1.0)
     return out
 
 
@@ -94,12 +93,12 @@ def make_verify_overlay_image(
     if other_name_bboxes:
         for other_name, other_bbox in other_name_bboxes:
             if other_bbox is not None:
-                out = draw_target_bbox(out, other_bbox, color=(0, 200, 0), label=f"OTHER:{other_name}")
+                out = draw_target_bbox(out, other_bbox, color=(0, 200, 0), label=f"OTHER:{other_name}", max_font_scale=0.7)
     # Orange: full panel region
     out = draw_target_bbox(out, bbox, color=(0, 165, 255), label="PANEL")
     # Blue: target panel name location
     if name_bbox is not None:
-        out = draw_target_bbox(out, name_bbox, color=(255, 0, 0), label=f"NAME:{panel_name}")
+        out = draw_target_bbox(out, name_bbox, color=(255, 0, 0), label="NAME", max_font_scale=1.0)
     return out
 
 
@@ -112,7 +111,7 @@ def make_locate_all_input_image(
     out = add_grid_overlay(img_bgr, grid_size)
     for name, bbox in all_name_bboxes.items():
         if bbox is not None:
-            out = draw_target_bbox(out, bbox, color=(255, 0, 0), label=f"NAME:{name}")
+            out = draw_target_bbox(out, bbox, color=(255, 0, 0), label="NAME", max_font_scale=1.0)
     return out
 
 
@@ -133,7 +132,7 @@ def make_verify_all_overlay_image(
     # Draw NAME boxes for all panels
     for name, bbox in all_name_bboxes.items():
         if bbox is not None:
-            out = draw_target_bbox(out, bbox, color=(255, 0, 0), label=f"NAME:{name}")
+            out = draw_target_bbox(out, bbox, color=(255, 0, 0), label="NAME", max_font_scale=1.0)
     return out
 
 

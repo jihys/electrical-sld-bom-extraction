@@ -595,9 +595,6 @@ def process_all_panels_batch(
             bbox = panel_states[name]['bbox']
             crop = img[bbox[1]:bbox[3], bbox[0]:bbox[2]]
             panel_states[name]['panel_crop'] = crop
-            s = safe_name(name)
-            cv2.imwrite(str(page_debug_dir / f'panel_{s}_v{attempt}.png'), verify_overlay)
-            cv2.imwrite(str(page_debug_dir / f'panel_{s}_v{attempt}.crop.png'), crop)
             panel_crops_ordered.append(crop)
 
         panels_info = [{'name': n, 'bbox': panel_states[n]['bbox'], 'exclude_regions': panel_states[n]['exclude_regions']} for n in pending]

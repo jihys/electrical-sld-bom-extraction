@@ -215,35 +215,88 @@ def build_name_extract_prompt() -> str:
 You are analyzing a cropped section of an electrical Single Line Diagram (SLD).
 
 ## Task
-Find the SHORT CODES that NAME EACH ENCLOSED PANEL BAY AREA in this switchboard diagram.
+Extract the short alphanumeric codes that NAME each enclosed panel bay in this SLD crop.
+Each drawing has its own naming convention — read exactly what is written.
 
-## Core principle
-In an electrical SLD, the switchboard is divided into individual bay areas by boundary lines
-(solid, dashed, or chain-dotted). Each enclosed region = ONE PANEL BAY.
+## Most important principle
+Panel name labels share a CONSISTENT visual pattern throughout the drawing:
+same shape (rectangle or hexagon), same border style, same position relative to bay
+boundaries. Identify that repeating pattern first, then extract every instance of it.
 
-## Rules
-1. Only return names that label enclosed panel bay regions.
-2. Panel names are typically 2-6 characters: "HV 1", "TR-2", "LV 3A", "MCC-A".
-3. Do NOT return component labels, wire tags, or terminal IDs.
-4. Return JSON only in exactly this format:
-{"extractable": true, "panel_names": ["NAME1", "NAME2", ...]}
-If the image does not contain panel bays, return:
-{"extractable": false, "panel_names": []}
-""".strip()
+## Step 1 — Identify the label pattern
+Find the repeating bordered boxes (rectangle or hexagon) that name each bay.
+Note shape, position, and line count. Apply the pattern consistently to all bays.
+
+## What counts as a panel bay name
+A panel bay name identifies a ZONE or SECTION of the switchboard — a bounded area
+that encloses multiple electrical components (breakers, busbars, CTs, etc.) together.
+The label box may sit ON or JUST OUTSIDE the boundary line of that zone — it does not
+need to be inside the bounded area. Look for small labeled boxes (rectangle or hexagon)
+at the corners or edges of dashed/solid boundary lines.
+Panel names often follow a pattern combining voltage class, floor, and bay identifier
+(e.g. 'LV 4F-1': low-voltage panel, 4th floor, bay 1 / 'HV 5F-2A': high-voltage,
+5th floor, bay 2A / 'TR 5F': transformer panel, 5th floor). Not all drawings use
+this convention, but such prefixes are part of the panel name and must be included.
+
+## Step 2 — Extract
+- Panel bay names are often written across TWO LINES inside the label box.
+  Combine the top line and bottom line into a single string (with space as separator).
+  Do NOT output each line separately.
+  Example: top='LV', bottom='4F-CON' → output 'LV 4F-CON'
+- Slashes in codes (e.g. 'X/B'): transcribe exactly — do not drop the slash.
+- Pure letter codes are valid if they label an enclosed zone.
+- If the same label pattern repeats for multiple bays (e.g. RF 2F-1A, RF 2F-2A, RF 3F-1A …),
+  list every distinct name — do not collapse repeating patterns into one.
+
+## Exclude
+- Room/area names, title block text, plain English phrases with no alphanumeric code
+- Labels accompanied by 'TO:' text — these are feeder/circuit destination identifiers,
+  not panel bay names (e.g. a box showing 'MCCE-1-F1' next to 'TO: ATS-1-F1' is a
+  feeder label, not a bay name)
+- Individual equipment/component type codes on device symbols (breakers, transformers,
+  current/voltage sensors, protection relays, switches, etc.) — these name a device,
+  not a bay area. Note: 'UPS', 'BAT' combined with a floor/number identifier
+  (e.g. 'UPS 3F-2', 'BAT 3F-5') are panel bay names — include them.
+- Product brand/model numbers, electrical specs (kV, kA, MVA), revision notes
+
+## Cut-off rule
+If a label box touches or crosses ANY edge of this image → omit it.
+Only include names whose box is fully visible. Other tiles will capture cut-off labels.
+
+## Extractability
+`extractable: false` only if this tile has NO bay section boxes at all or all labels
+are blanked out. Bays present but no labels → `extractable: true`, `panel_names: []`.
+
+Return JSON only:
+""".strip() + "\n" + json.dumps(EXTRACT_NAMES_SCHEMA, indent=2)
 
 
 def build_name_dedup_prompt(candidates: list[str]) -> str:
+    candidates_json = json.dumps(candidates, ensure_ascii=False, indent=2)
     return f"""
-Deduplicate and canonicalize these panel name candidates:
-{json.dumps(candidates, ensure_ascii=False)}
+You are reviewing electrical panel bay label extraction for one page of an SLD.
 
-Rules:
-1. Merge spelling variants (e.g. 'GCP1' → 'GCP 1').
-2. Remove false positives that are not real panel names.
-3. Return the canonical list.
+## Candidate panel bay labels (from tile crops of this page)
+{candidates_json}
 
-Return JSON only in this format:
-{{"panel_names": ["NAME1", "NAME2", ...]}}
+## Your task: CLEAN and DEDUPLICATE only
+All output names must appear in the candidates list above (possibly in variant spelling).
+Adding new names that are not in the candidates list is not needed.
+
+### Cleaning rules
+1. Keep ALL candidates. Do not remove any name.
+2. Fix typos and normalize formatting within candidates:
+   - Add missing hyphens: 'EHV8' → 'E-HV-08', 'EHV2A' → 'E-HV-02A'
+   - Normalize zero-padding to the dominant format in each series
+   - OCR corrections: 'E-HV-0B' → 'E-HV-08' (B≈8), 'E-HV-0l' → 'E-HV-01' (l≈1)
+   - Merge OCR variants of the same label into one canonical form
+   Keep BOTH if they could be genuinely distinct panels.
+2b. Fix duplicate-in-series gaps: replace ONE duplicate with the missing adjacent
+   number when gap == 1.  Example: [E-HV-08, E-HV-08, E-HV-10] → E-HV-09 replaces
+   one E-HV-08.  Replaces a duplicate — does not increase total count.
+
+Return JSON only:
+{json.dumps(DEDUP_NAMES_SCHEMA, indent=2)}
 """.strip()
 
 

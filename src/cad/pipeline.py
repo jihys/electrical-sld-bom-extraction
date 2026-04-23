@@ -41,6 +41,7 @@ from .image_utils import (
     draw_polygon,
     hex_to_bgr,
 )
+from .grid_utils import draw_ruler
 from .llm_client import (
     BATCH_VERIFICATION_SCHEMA,
     DIRECTIONAL_VERIFICATION_SCHEMA,
@@ -929,10 +930,8 @@ def batch_verify_crops(
     h_img, w_img = base_image.shape[:2]
     image_size = (w_img, h_img)
 
-    # Build overlay: grid + orange existing + purple candidates with labels
-    overlay = draw_grid_with_cell_numbers(
-        base_image, step_x=grid_step_x, step_y=grid_step_y
-    )
+    # Build overlay: ruler ticks + orange existing + purple candidates with labels
+    overlay = draw_ruler(base_image, step_x=grid_step_x, step_y=grid_step_y)
     for crop in existing_crops:
         if crop.polygon:
             draw_polygon(overlay, crop.polygon, hex_to_bgr("#f97316"), 10)

@@ -19,6 +19,30 @@ from ..tools.image_tools import ndarray_to_data_url
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Whitespace trimming
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _trim_whitespace(img: np.ndarray, threshold: int = 245, padding: int = 10,
+                     min_pixels: int = 5) -> np.ndarray:
+    """Crop out near-white margins from a tile image.
+
+    A row/column is treated as content only if >= min_pixels pixels are non-white,
+    so thin border lines (1-2px) spanning the full tile are ignored.
+    """
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    mask = gray < threshold
+    content_rows = np.where(mask.sum(axis=1) >= min_pixels)[0]
+    content_cols = np.where(mask.sum(axis=0) >= min_pixels)[0]
+    if len(content_rows) == 0 or len(content_cols) == 0:
+        return img
+    r1 = max(0, int(content_rows[0]) - padding)
+    r2 = min(img.shape[0], int(content_rows[-1]) + padding + 1)
+    c1 = max(0, int(content_cols[0]) - padding)
+    c2 = min(img.shape[1], int(content_cols[-1]) + padding + 1)
+    return img[r1:r2, c1:c2]
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Tiling
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -57,6 +81,8 @@ def extract_names_from_tile(
 ) -> List[str]:
     """Extract panel names from a single tile image."""
     import tempfile, os
+    # Trim whitespace margins to focus on content
+    tile_img = _trim_whitespace(tile_img)
     # Save tile temporarily for LLM call
     tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
     cv2.imwrite(tmp.name, tile_img)
@@ -100,11 +126,16 @@ def dedup_panel_names(
     deployment: str,
     page_img_path: str,
 ) -> List[str]:
-    """Deduplicate candidates via LLM with full page image for verification."""
+    """Deduplicate candidates via LLM, then apply hallucination guard + series gap-fill."""
     if not candidates:
         return []
 
-    prompt = build_name_dedup_prompt(candidates)
+    # Pre-merge exact duplicates preserving order
+    merged = list(dict.fromkeys(n.strip() for n in candidates if n.strip()))
+    if not merged:
+        return []
+
+    prompt = build_name_dedup_prompt(merged)
     raw = call_llm(
         llm_client, deployment, prompt,
         image_paths=[page_img_path],
@@ -112,10 +143,103 @@ def dedup_panel_names(
     )
     result = parse_json(raw)
     if isinstance(result, list):
-        return [str(n) for n in result if isinstance(n, str)] or candidates
-    if isinstance(result, dict):
-        return result.get("panel_names") or result.get("panel_bays") or result.get("names") or candidates
-    return candidates
+        cleaned = [str(n).strip() for n in result if isinstance(n, str) and str(n).strip()]
+    elif isinstance(result, dict):
+        names = result.get("panel_names") or result.get("panel_bays") or result.get("names") or merged
+        cleaned = [str(n).strip() for n in names if str(n).strip()]
+    else:
+        cleaned = merged
+
+    # ── Hard guard: only keep names traceable to the merged candidate set ─────
+    _OCR_PAIRS = frozenset(
+        frozenset(pair) for pair in [
+            ('0', 'O'), ('0', 'D'), ('0', 'Q'),
+            ('1', 'I'), ('1', 'L'), ('1', '7'),
+            ('2', 'Z'), ('5', 'S'), ('6', 'G'),
+            ('8', 'B'), ('9', 'G'), ('9', 'Q'),
+        ]
+    )
+
+    def _norm(s: str) -> str:
+        s = re.sub(r"[\s\-]", "", s).upper()
+        s = re.sub(r"(?<!\d)0+(\d)", r"\1", s)
+        return s
+
+    def _light_norm(s: str) -> str:
+        return re.sub(r"[\s\-_]", "", s).upper()
+
+    def _ocr_close(a: str, b: str) -> bool:
+        if len(a) != len(b):
+            return False
+        diffs = [(ca, cb) for ca, cb in zip(a, b) if ca != cb]
+        if len(diffs) != 1:
+            return False
+        return frozenset(diffs[0]) in _OCR_PAIRS
+
+    candidate_norms  = {_norm(c) for c in merged}
+    light_candidates = {_light_norm(c) for c in merged}
+
+    allowed: List[str] = []
+    ocr_fixed: List[str] = []
+    blocked: List[str] = []
+    for name in cleaned:
+        if _norm(name) in candidate_norms:
+            allowed.append(name)
+        elif any(_ocr_close(_light_norm(name), lc) for lc in light_candidates):
+            allowed.append(name)
+            ocr_fixed.append(name)
+        else:
+            blocked.append(name)
+
+    if ocr_fixed:
+        print(f"  [dedup-guard] OCR-corrected {len(ocr_fixed)} name(s): {ocr_fixed[:5]}")
+    if blocked:
+        print(f"  [dedup-guard] Blocked {len(blocked)} hallucinated name(s): "
+              f"{blocked[:10]}{'...' if len(blocked) > 10 else ''}")
+
+    # ── Series gap-fill: replace duplicate with missing adjacent number ────────
+    return _fill_series_gaps(allowed)
+
+
+def _fill_series_gaps(names: List[str]) -> List[str]:
+    """Replace one duplicate with the missing adjacent number when gap == 1."""
+    from collections import Counter
+
+    _SERIES_PAT = re.compile(r'^(.*?)(\d+)([^0-9]*)$')
+    groups: dict = {}
+    unparsed: List[str] = []
+    for n in names:
+        m = _SERIES_PAT.match(n)
+        if m:
+            pre, num_s, suf = m.groups()
+            groups.setdefault((pre, suf, len(num_s)), []).append(int(num_s))
+        else:
+            unparsed.append(n)
+
+    result = list(unparsed)
+    for (pre, suf, zpad), nums in groups.items():
+        cnt = Counter(nums)
+        unique_sorted = sorted(cnt)
+        out_nums = list(nums)
+
+        for i in range(len(unique_sorted) - 1):
+            a, b = unique_sorted[i], unique_sorted[i + 1]
+            if b - a == 2:
+                gap = a + 1
+                if cnt[a] > 1:
+                    cnt[a] -= 1
+                    out_nums[out_nums.index(a)] = gap
+                    cnt[gap] = cnt.get(gap, 0) + 1
+                elif cnt[b] > 1:
+                    cnt[b] -= 1
+                    idx = len(out_nums) - 1 - out_nums[::-1].index(b)
+                    out_nums[idx] = gap
+                    cnt[gap] = cnt.get(gap, 0) + 1
+
+        fmt = f"{{:0{zpad}d}}" if zpad > 1 else "{:d}"
+        result.extend(pre + fmt.format(n) + suf for n in out_nums)
+
+    return result
 
 
 def hallucination_guard(
