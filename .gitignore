@@ -47,3 +47,4 @@ data/h_test.pdf
 # Allow example templates (no secrets)
 !.env.local.example
 !.env.cloud.example
+.env.backup*

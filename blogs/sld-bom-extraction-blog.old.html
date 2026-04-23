@@ -1,0 +1,1119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Automating BOM Extraction from Electrical Single-Line Diagrams with GPT-5 and Azure Document Intelligence</title>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <style>
+        :root {
+            --bg: #ffffff;
+            --text: #1a1a2e;
+            --text-secondary: #555;
+            --accent: #4A90D9;
+            --accent-light: #EBF5FB;
+            --border: #e0e0e0;
+            --code-bg: #f6f8fa;
+            --card-bg: #fafbfc;
+            --orange: #E67E22;
+            --purple: #8E44AD;
+            --green: #27AE60;
+            --gray: #7F8C8D;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+            color: var(--text);
+            background: var(--bg);
+            line-height: 1.75;
+            font-size: 17px;
+        }
+
+        /* Hero */
+        .hero {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            color: white;
+            padding: 80px 0 60px;
+            text-align: center;
+        }
+        .hero h1 {
+            font-size: 2.6rem;
+            font-weight: 700;
+            max-width: 900px;
+            margin: 0 auto 20px;
+            line-height: 1.25;
+        }
+        .hero .subtitle {
+            font-size: 1.15rem;
+            color: #b0c4de;
+            max-width: 700px;
+            margin: 0 auto 30px;
+        }
+        .hero .tags {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 8px;
+        }
+        .hero .tag {
+            background: rgba(255,255,255,0.12);
+            border: 1px solid rgba(255,255,255,0.2);
+            color: #ccc;
+            padding: 4px 14px;
+            border-radius: 20px;
+            font-size: 0.82rem;
+        }
+
+        /* Layout */
+        .container {
+            max-width: 860px;
+            margin: 0 auto;
+            padding: 0 24px;
+        }
+        article {
+            padding: 50px 0 80px;
+        }
+
+        /* Typography */
+        h2 {
+            font-size: 1.85rem;
+            font-weight: 700;
+            margin: 55px 0 18px;
+            color: var(--text);
+            border-bottom: 2px solid var(--accent);
+            padding-bottom: 8px;
+        }
+        h3 {
+            font-size: 1.35rem;
+            font-weight: 600;
+            margin: 35px 0 12px;
+            color: #2c3e50;
+        }
+        h4 {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin: 25px 0 8px;
+            color: #34495e;
+        }
+        p {
+            margin: 0 0 16px;
+            color: var(--text-secondary);
+        }
+        strong { color: var(--text); }
+        ul, ol {
+            margin: 0 0 18px 24px;
+            color: var(--text-secondary);
+        }
+        li { margin-bottom: 6px; }
+
+        /* Code */
+        pre {
+            background: var(--code-bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 20px 24px;
+            overflow-x: auto;
+            margin: 16px 0 24px;
+            font-size: 0.88rem;
+            line-height: 1.6;
+        }
+        code {
+            font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+            font-size: 0.9em;
+        }
+        p code, li code {
+            background: var(--code-bg);
+            border: 1px solid var(--border);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.85em;
+            color: #c0392b;
+        }
+
+        /* Figures */
+        figure {
+            margin: 28px 0;
+            text-align: center;
+        }
+        figure img {
+            max-width: 100%;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+        }
+        figcaption {
+            font-size: 0.88rem;
+            color: var(--gray);
+            margin-top: 10px;
+            font-style: italic;
+            max-width: 700px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        /* Mermaid diagrams */
+        .mermaid-wrapper {
+            margin: 28px 0;
+            text-align: center;
+            overflow-x: auto;
+        }
+        .mermaid {
+            display: inline-block;
+        }
+
+        /* Info cards */
+        .callout {
+            background: var(--accent-light);
+            border-left: 4px solid var(--accent);
+            padding: 18px 22px;
+            border-radius: 0 8px 8px 0;
+            margin: 20px 0;
+        }
+        .callout p { margin: 0; color: var(--text); }
+        .callout.warning {
+            background: #fef9e7;
+            border-left-color: var(--orange);
+        }
+        .callout.success {
+            background: #eafaf1;
+            border-left-color: var(--green);
+        }
+
+        /* Tables */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 18px 0 24px;
+            font-size: 0.95rem;
+        }
+        th {
+            background: #f0f3f5;
+            font-weight: 600;
+            text-align: left;
+            padding: 12px 16px;
+            border-bottom: 2px solid var(--border);
+        }
+        td {
+            padding: 10px 16px;
+            border-bottom: 1px solid var(--border);
+            color: var(--text-secondary);
+        }
+        tr:hover td { background: #fafbfc; }
+
+        /* Legend badge */
+        .legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin: 16px 0;
+            font-size: 0.88rem;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .legend-dot {
+            width: 14px;
+            height: 14px;
+            border-radius: 3px;
+            display: inline-block;
+        }
+
+        /* Section number */
+        .section-num {
+            display: inline-block;
+            background: var(--accent);
+            color: white;
+            width: 32px;
+            height: 32px;
+            line-height: 32px;
+            text-align: center;
+            border-radius: 50%;
+            font-weight: 700;
+            font-size: 0.9rem;
+            margin-right: 10px;
+            vertical-align: middle;
+        }
+
+        /* Takeaway cards */
+        .takeaway-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            margin: 20px 0;
+        }
+        .takeaway-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 20px;
+        }
+        .takeaway-card h4 {
+            margin: 0 0 8px;
+            font-size: 1rem;
+            color: var(--accent);
+        }
+        .takeaway-card p {
+            margin: 0;
+            font-size: 0.92rem;
+        }
+
+        /* Pipeline step header */
+        .step-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin: 40px 0 16px;
+        }
+        .step-badge {
+            background: var(--accent);
+            color: white;
+            padding: 4px 16px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        /* Technique box */
+        .technique-box {
+            background: linear-gradient(135deg, #f8f9fa 0%, #fff 100%);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 28px;
+            margin: 24px 0;
+        }
+        .technique-box h4 {
+            margin-top: 0;
+            color: var(--accent);
+        }
+
+        /* Two-column layout */
+        .two-col {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
+            margin: 20px 0;
+        }
+        .two-col > div {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 20px;
+        }
+
+        /* Footer */
+        footer {
+            background: #1a1a2e;
+            color: #888;
+            text-align: center;
+            padding: 30px 0;
+            font-size: 0.85rem;
+        }
+        footer a { color: var(--accent); text-decoration: none; }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .hero h1 { font-size: 1.8rem; }
+            .takeaway-grid, .two-col { grid-template-columns: 1fr; }
+            pre { padding: 14px 16px; font-size: 0.82rem; }
+        }
+
+        /* TOC */
+        .toc {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 24px 28px;
+            margin: 30px 0;
+        }
+        .toc h3 {
+            margin: 0 0 12px;
+            font-size: 1.1rem;
+        }
+        .toc ol {
+            margin: 0;
+            padding-left: 20px;
+        }
+        .toc li {
+            margin-bottom: 4px;
+        }
+        .toc a {
+            color: var(--accent);
+            text-decoration: none;
+        }
+        .toc a:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+
+<!-- Hero -->
+<header class="hero">
+    <div class="container">
+        <h1>Automating BOM Extraction from Electrical Single-Line Diagrams</h1>
+        <p class="subtitle">
+            A multi-stage pipeline combining GPT-5, Azure Document Intelligence, and iterative self-correction
+            to extract structured Bills of Materials from complex CAD drawings.
+        </p>
+        <div class="tags">
+            <span class="tag">#GPT-5</span>
+            <span class="tag">#Azure OpenAI</span>
+            <span class="tag">#Document Intelligence</span>
+            <span class="tag">#Computer Vision</span>
+            <span class="tag">#Single Line Diagram</span>
+            <span class="tag">#BOM Extraction</span>
+            <span class="tag">#Prompt Engineering</span>
+            <span class="tag">#CAD Image Understanding</span>
+        </div>
+    </div>
+</header>
+
+<div class="container">
+<article>
+
+<!-- TOC -->
+<nav class="toc">
+    <h3>Table of Contents</h3>
+    <ol>
+        <li><a href="#problem">The Problem</a></li>
+        <li><a href="#architecture">Pipeline Architecture: Divide and Conquer</a></li>
+        <li><a href="#technique1">Technique 1: Two-Pass Document Intelligence Detection</a></li>
+        <li><a href="#technique2">Technique 2: Hybrid LLM + OCR for Text Localization</a></li>
+        <li><a href="#technique3">Technique 3: Iterative Locate → Verify with Oscillation Guard</a></li>
+        <li><a href="#technique4">Technique 4: Few-Shot Image Guidelines</a></li>
+        <li><a href="#technique5">Technique 5: Reasoning Mode — Performance vs. Cost</a></li>
+        <li><a href="#technique6">Technique 6: Expert-in-the-Loop Prompt Refinement</a></li>
+        <li><a href="#results">BOM Extraction Results</a></li>
+        <li><a href="#principles">System Design Principles</a></li>
+        <li><a href="#takeaways">Key Takeaways</a></li>
+        <li><a href="#next">What's Next</a></li>
+    </ol>
+</nav>
+
+
+<!-- ===== THE PROBLEM ===== -->
+<h2 id="problem">The Problem</h2>
+
+<p>
+Electrical engineering drawings — especially single-line diagrams (SLDs) — are notoriously hard to parse programmatically.
+They combine dense symbols, small text, and complex geometric structures, all varying in style across documents and vendors.
+</p>
+<p>
+Traditionally, extracting a Bill of Materials (BOM) from electrical drawings has been a manual task — engineers or hired
+temporary workers would read through each diagram page by page and transcribe component lists by hand. It is time-consuming,
+error-prone, and does not scale.
+</p>
+<p>
+The obvious question: <strong>can a Vision Language Model automate this?</strong>
+</p>
+<p>
+We had to rely primarily on the visual content of PDF-converted images alone — without guaranteed access to supplementary
+structural information like CAD vector data or metadata. That constraint is the core challenge this pipeline was designed to solve.
+</p>
+
+<div class="callout warning">
+    <p><strong>Why naive LLM inference fails:</strong> Simply feeding a full diagram page to an LLM and asking for a BOM
+    fails catastrophically — too much visual complexity in a single context. Components get missed, hallucinated,
+    or assigned to the wrong panel.</p>
+</div>
+
+
+<!-- ===== ARCHITECTURE ===== -->
+<h2 id="architecture">Pipeline Architecture: Divide and Conquer</h2>
+
+<p>
+The core insight: <strong>the unit of analysis must be the panel, not the page.</strong>
+</p>
+<p>
+A single diagram page can contain dozens of panels, each representing a distinct electrical cabinet with its own set of components.
+Asking a model to extract a complete BOM from an entire page is asking it to simultaneously locate, read, and count every component
+across all panels — a task that proved too complex even for GPT-5.
+</p>
+<p>
+The solution was to first identify and crop each panel as an independent region, then extract the BOM panel by panel.
+This transformed an intractable whole-page problem into a series of manageable, well-scoped sub-tasks.
+</p>
+
+<!-- Pipeline Diagram -->
+<div class="mermaid-wrapper">
+    <pre class="mermaid">
+flowchart TD
+    A["📄 PDF Input"] --> B
+
+    subgraph B[" Stage 1 · Page Segmentation "]
+        B1["PyMuPDF\nPDF → PNG & SVG"] --> B2["Azure Document Intelligence\n2-Pass Figure Detection"]
+    end
+
+    B --> C
+
+    subgraph C[" Stage 2 · GPT-5 Assisted Region Detection "]
+        C1["Grid Overlay\n+ Coordinate Labels"] --> C2["GPT-5\nDetect Missed Regions"]
+        C2 --> C3["GPT-5\nVerify & Correct Boundaries"]
+    end
+
+    C --> D
+
+    subgraph D[" Stage 3 · Panel Name Extraction & Matching "]
+        D1["GPT-5\nTile-Based Name Extraction"] --> D3["6-Pass Rule Engine\n+ LLM Fallback Matching"]
+        D2["Azure DI OCR\nText & Coordinates"] --> D3
+    end
+
+    D --> E
+
+    subgraph E[" Stage 4 · Panel Area Segmentation "]
+        E1["GPT-5\nLocate → Verify Loop\n(max 10 iterations)"]
+    end
+
+    E --> F
+
+    subgraph F[" Stage 5 · Bay Split & BOM Extraction "]
+        F1["GPT-5\nBay Subdivision"] --> F2["GPT-5\nExtract BOM per Bay"]
+    end
+
+    F --> G["✅ Structured BOM Output"]
+
+    style C2 fill:#4A90D9,color:#fff
+    style C3 fill:#4A90D9,color:#fff
+    style D1 fill:#4A90D9,color:#fff
+    style E1 fill:#4A90D9,color:#fff
+    style F1 fill:#4A90D9,color:#fff
+    style F2 fill:#4A90D9,color:#fff
+    style B2 fill:#E67E22,color:#fff
+    style D2 fill:#E67E22,color:#fff
+    style D3 fill:#8E44AD,color:#fff
+    style B1 fill:#7F8C8D,color:#fff
+    style C1 fill:#7F8C8D,color:#fff
+    style A fill:#2C3E50,color:#fff
+    style G fill:#27AE60,color:#fff
+    </pre>
+</div>
+
+<div class="legend">
+    <div class="legend-item"><span class="legend-dot" style="background:#4A90D9"></span> GPT-5 (Vision LLM)</div>
+    <div class="legend-item"><span class="legend-dot" style="background:#E67E22"></span> Azure Document Intelligence</div>
+    <div class="legend-item"><span class="legend-dot" style="background:#8E44AD"></span> Hybrid (LLM + Rule-based)</div>
+    <div class="legend-item"><span class="legend-dot" style="background:#7F8C8D"></span> Deterministic / Rule-based</div>
+</div>
+
+<p>
+The pipeline is implemented as a chain of 7 <strong>executor stages</strong>, each with a single well-defined responsibility
+and structured message passing between stages:
+</p>
+
+<table>
+    <thead>
+        <tr><th>#</th><th>Stage</th><th>Executor</th><th>Role</th></tr>
+    </thead>
+    <tbody>
+        <tr><td>1</td><td>Segment</td><td><code>SegmentExecutor</code></td><td>PDF → per-page PNG/SVG images</td></tr>
+        <tr><td>2</td><td>Detect</td><td><code>DetectExecutor</code></td><td>DI 2-pass figure detection + OCR line extraction</td></tr>
+        <tr><td>3</td><td>NameExt</td><td><code>NameExtExecutor</code></td><td>Tile-based panel name extraction + dedup + hallucination guard</td></tr>
+        <tr><td>4</td><td>Match</td><td><code>MatchExecutor</code></td><td>6-pass rule matching + LLM fallback for name → location mapping</td></tr>
+        <tr><td>5</td><td>LocateVerify</td><td><code>LocateVerifyExecutor</code></td><td>Iterative Locate → Verify loop per panel (max 10 iterations)</td></tr>
+        <tr><td>6</td><td>Validation</td><td><code>ValidationExecutor</code></td><td>Cross-panel validation + HITL routing</td></tr>
+        <tr><td>7</td><td>BaySplit</td><td><code>BaySplitExecutor</code></td><td>Bay subdivision + final BOM extraction</td></tr>
+    </tbody>
+</table>
+
+<p>
+Three <strong>Human-in-the-Loop (HITL) checkpoints</strong> are integrated into the pipeline via a Streamlit UI,
+allowing domain experts to review and correct intermediate results:
+</p>
+
+<table>
+    <thead>
+        <tr><th>HITL #</th><th>After Stage</th><th>What's Reviewed</th></tr>
+    </thead>
+    <tbody>
+        <tr><td>1</td><td>Figure Detection</td><td>Review & edit detected image regions with an interactive canvas editor</td></tr>
+        <tr><td>2</td><td>Panel Names</td><td>Confirm or correct extracted panel names</td></tr>
+        <tr><td>3</td><td>Panel Areas</td><td>Review low-confidence panels (confidence &lt; 0.7), adjust bounding boxes</td></tr>
+    </tbody>
+</table>
+
+<figure>
+    <img src="../docs/images/03_figure_detection.png" alt="HITL Figure Detection UI">
+    <figcaption>Streamlit HITL interface for reviewing figure detection results. The DI-detected and LLM-supplemented regions are displayed for human review.</figcaption>
+</figure>
+
+<figure>
+    <img src="../docs/images/04_panel_areas.png" alt="HITL Panel Areas UI">
+    <figcaption>Panel area review interface showing detected panel bounding boxes with resize/move capability for human correction.</figcaption>
+</figure>
+
+
+<!-- ===== TECHNIQUE 1 ===== -->
+<h2 id="technique1"><span class="section-num">1</span> Two-Pass Document Intelligence Detection</h2>
+
+<p>
+The first stage converts each PDF page into high-resolution PNG images using PyMuPDF, with DPI automatically computed
+per page based on minimum font size to ensure text remains legible.
+</p>
+
+<pre><code># DPI computation: ensures smallest text is readable
+# Formula: target_min_px × 72 / font_pt
+# Clamped to [72, 720], rounded to nearest 72
+dpi = compute_dpi_for_pdf(pdf_path)
+pages = split_pdf_to_pages(pdf_path, output_dir, dpi)</code></pre>
+
+<p>
+Azure Document Intelligence's <code>prebuilt-layout</code> model then detects figure regions and extracts OCR text.
+However, a single pass often misses figures that are visually occluded by larger detected regions. The solution:
+<strong>two-pass detection with white-fill erasure</strong>.
+</p>
+
+<div class="technique-box">
+    <h4>Two-Pass Detection Strategy</h4>
+    <pre><code># Pass 1: Analyze original page
+pass1 = analyze_page(di_client, "prebuilt-layout", image_path)
+pass1_bboxes = [f["bbox"] for f in pass1["figures"]]
+
+# Pass 2: White-fill Pass 1 detections, re-run DI
+if pass1_bboxes:
+    white_fill_regions(image_path, pass1_bboxes, whitefill_path)
+    pass2 = analyze_page(di_client, "prebuilt-layout", whitefill_path)
+
+    # Merge & deduplicate by IoU
+    all_figures = pass1["figures"] + pass2["figures"]
+    deduped = _dedup_figure_bboxes(all_figures, iou_threshold=0.5)</code></pre>
+    <p>
+    <strong>Why it works:</strong> Pass 2 reveals figures previously hidden beneath large detected regions,
+    achieving comprehensive coverage. After DI detection, GPT-5 supplements by detecting regions missed by both passes,
+    using a numbered grid overlay as spatial reference.
+    </p>
+</div>
+
+
+<!-- ===== TECHNIQUE 2 ===== -->
+<h2 id="technique2"><span class="section-num">2</span> Hybrid LLM + OCR for Text Localization</h2>
+
+<p>
+To segment panel areas, we first need to know <strong>where panel names appear in the image</strong>. Panel names act as
+anchor points — once we know their locations, we can use them as seeds to identify the boundaries of each panel region.
+</p>
+<p>
+Neither GPT-5 nor OCR alone is sufficient:
+</p>
+<ul>
+    <li><strong>GPT-5:</strong> great at identifying <em>what</em> the text says, but imprecise on exact pixel locations</li>
+    <li><strong>Azure Document Intelligence:</strong> precise coordinates for all text, but struggles with domain-specific abbreviations and electrical symbols</li>
+</ul>
+
+<h3>Step 1: Tile-Based Name Extraction</h3>
+
+<p>
+Rather than feeding the entire page to the LLM, we split it into overlapping vertical tiles (2000px wide, 400px overlap)
+and extract panel name candidates from each tile independently. This reduces visual complexity per LLM call and improves recall.
+</p>
+
+<pre><code># Split page into overlapping tiles for LLM name extraction
+tiles = tile_page(image_path, tile_width=2000, overlap=400)
+
+# Extract names from each tile independently
+for tile_img, tile_coords in tiles:
+    names = extract_names_from_tile(tile_img, llm_client, deployment)
+    # LLM identifies SHORT CODES: "HV 1", "TR-2", "LV 3A"
+    # Rejects: component labels, wire tags, terminal IDs</code></pre>
+
+<h3>Step 2: Hallucination Guard</h3>
+
+<p>
+LLMs sometimes fabricate panel names that don't exist in the image. We cross-validate all LLM-extracted names against
+the DI OCR text pool using fuzzy matching:
+</p>
+
+<pre><code>def hallucination_guard(names, di_lines):
+    verified = []
+    for name in names:
+        if _name_in_ocr(name, ocr_texts):  # 3 matching modes:
+            verified.append(name)           #   1. Exact substring
+            # 2. Same length, ≤1 char diff
+            # 3. Alphanumeric stripping (ignore spaces/punctuation)
+        else:
+            print(f"  Dropped '{name}' — no OCR match")
+    return verified</code></pre>
+
+<h3>Step 3: 6-Pass Rule Matching Engine</h3>
+
+<p>
+Once names are verified, we need to locate their exact pixel positions. Rather than relying on the LLM for localization,
+we implemented a cascading rule engine that matches panel names against DI OCR bounding boxes with decreasing confidence:
+</p>
+
+<div class="mermaid-wrapper">
+    <pre class="mermaid">
+flowchart LR
+    A["Panel Name\nCandidates"] --> B["Pass 1\nExact Match\n★ 1.0"]
+    B --> C["Pass 2\nAlphanumeric\n★ 0.9"]
+    C --> D["Pass 3\nSubstring\n★ 0.75"]
+    D --> E["Pass 4\nMulti-line\nMerge ★ 0.7"]
+    E --> F["Pass 5\nOCR-Similar\n★ 0.6"]
+    F --> G["Conflict\nResolution"]
+    G --> H["LLM Fallback\n(unresolved)"]
+    H --> I["Matched\nBboxes"]
+
+    style A fill:#2C3E50,color:#fff
+    style B fill:#27AE60,color:#fff
+    style C fill:#27AE60,color:#fff
+    style D fill:#F39C12,color:#fff
+    style E fill:#F39C12,color:#fff
+    style F fill:#E74C3C,color:#fff
+    style G fill:#8E44AD,color:#fff
+    style H fill:#4A90D9,color:#fff
+    style I fill:#2C3E50,color:#fff
+    </pre>
+</div>
+
+<pre><code>def rule_match_panel_name(panel_name, di_lines, max_merge=3):
+    # Pass 1: Exact match (case-insensitive)          → confidence 1.0
+    # Pass 2: Alphanumeric (O/0, I/1 tolerance)       → confidence 0.9
+    # Pass 3: Substring containment (≥3 chars)         → confidence 0.75
+    # Pass 4: Multi-line merge (adjacent DI lines)     → confidence 0.7
+    # Pass 5: OCR-confusable (1-char diff, v↔y, s↔5)  → confidence 0.6
+
+    # Conflict resolution: shared bbox → keep highest confidence
+    # LLM fallback: for still-unmatched names</code></pre>
+
+<div class="callout success">
+    <p><strong>Why this hybrid approach works:</strong> The LLM identifies <em>what</em> the panel names are (semantic),
+    while Azure DI provides <em>where</em> they are (geometric). The rule engine bridges the two with
+    OCR-aware fuzzy matching. This is significantly more robust than either system alone.</p>
+</div>
+
+
+<!-- ===== TECHNIQUE 3 ===== -->
+<h2 id="technique3"><span class="section-num">3</span> Iterative Locate → Verify with Oscillation Guard</h2>
+
+<p>
+With panel names located, the next challenge is identifying the full panel boundary — the bounding box that encloses
+all electrical components belonging to that panel. This is arguably the hardest stage in the pipeline: panels can be
+irregularly shaped, share edges with neighbors, and have boundaries formed by a mix of dashed, solid, and implied lines.
+</p>
+
+<p>
+Rather than asking the LLM to find the boundary in one shot (which is unreliable), we implemented an
+<strong>iterative Locate → Verify correction loop</strong> with up to 10 attempts per panel.
+</p>
+
+<div class="mermaid-wrapper">
+    <pre class="mermaid">
+flowchart TD
+    A["Start: Panel Name + Location"] --> B["Compose Locate Input\n(Grid + Blue NAME box + Green neighbors)"]
+    B --> C["GPT-5: Locate Panel Bbox"]
+    C --> D{"Bbox contains\nname location?"}
+    D -->|No| B
+    D -->|Yes| E["Compose Verify Input\n(Grid + Orange PANEL box)"]
+    E --> F["GPT-5: Verify 4 Edges\n(ok / expand / shrink)"]
+    F --> G{"All edges ok?"}
+    G -->|Yes| H["✅ Panel Verified\n(confidence: 0.95)"]
+    G -->|No| I{"Attempt < 10?"}
+    I -->|Yes| J["Apply Corrections\n+ Oscillation Guard"]
+    J --> B
+    I -->|No| K["⚠️ Best-effort Bbox\n(lower confidence)"]
+
+    style C fill:#4A90D9,color:#fff
+    style F fill:#4A90D9,color:#fff
+    style H fill:#27AE60,color:#fff
+    style K fill:#E67E22,color:#fff
+    </pre>
+</div>
+
+<h3>Visual Prompt Composition</h3>
+
+<p>
+Each iteration constructs a carefully composed image for the LLM, providing spatial context through visual overlays:
+</p>
+
+<div class="two-col">
+    <div>
+        <h4>Locate Input</h4>
+        <ul>
+            <li>Gray numbered <strong>grid overlay</strong> (120px spacing)</li>
+            <li><strong style="color:#4A90D9">Blue box</strong> — target panel name location (<code>NAME:{panel_name}</code>)</li>
+            <li><strong style="color:#27AE60">Green boxes</strong> — other panels as spatial reference</li>
+        </ul>
+    </div>
+    <div>
+        <h4>Verify Input</h4>
+        <ul>
+            <li>Gray numbered <strong>grid overlay</strong></li>
+            <li><strong style="color:#E67E22">Orange box</strong> — current proposed panel bbox (<code>PANEL</code>)</li>
+            <li><strong style="color:#4A90D9">Blue box</strong> — panel name location</li>
+            <li><strong style="color:#27AE60">Green boxes</strong> — neighboring panels</li>
+        </ul>
+    </div>
+</div>
+
+<p>
+The verify step analyzes each edge independently and returns a structured JSON response:
+</p>
+
+<pre><code>// Verify response schema
+{
+  "valid": false,
+  "edges": {
+    "x1": { "status": "expand", "delta": -45, "corrected": 120 },
+    "y1": { "status": "ok" },
+    "x2": { "status": "shrink", "delta": -30, "corrected": 850 },
+    "y2": { "status": "expand", "delta": 60, "corrected": 1200 }
+  },
+  "corrected_bbox": [120, 200, 850, 1200]
+}</code></pre>
+
+<h3>Oscillation Detection</h3>
+
+<p>
+A critical failure mode we discovered: the LLM can oscillate on an axis — expanding, then shrinking, then expanding again —
+never converging. We implemented oscillation detection using a 3-value history per axis:
+</p>
+
+<pre><code># Track last 3 corrections per axis
+axis_history = {axis: [] for axis in ["x1", "y1", "x2", "y2"]}
+
+for attempt in range(1, max_tries + 1):
+    # ... locate and verify ...
+
+    for axis in AXES:
+        hist = axis_history[axis]
+        if len(hist) >= 3:
+            a, b, c = hist[-3:]
+            # Detect: (a < b > c) or (a > b < c) → oscillating
+            if (a < b and b > c) or (a > b and b < c):
+                corrected[axis] = hist[-2]  # Freeze at previous value
+                # Prevents infinite oscillation loops</code></pre>
+
+<div class="callout">
+    <p>The iterative loop processes all panels on a page in batch mode — a single <code>locate-all</code> LLM call
+    positions all panels simultaneously, followed by batch verification with individual crop images. This reduces
+    per-panel LLM calls from N to 1.</p>
+</div>
+
+
+<!-- ===== TECHNIQUE 4 ===== -->
+<h2 id="technique4"><span class="section-num">4</span> Few-Shot Image Guidelines</h2>
+
+<p>
+Text prompts alone struggle to convey spatial concepts like "what a panel boundary looks like" — the visual vocabulary
+of electrical drawings is too domain-specific to describe in words alone.
+The solution: provide GPT-5 with <strong>few-shot reference images</strong> directly in the prompt.
+</p>
+
+<pre><code>def locate_and_verify_batch(..., guide_image_paths=None):
+    guides = list(guide_image_paths or [])
+    # Prepend guide images to LLM inputs:
+    loc_raw = call_llm(
+        llm_client, deployment, locate_prompt,
+        image_paths=guides + [locate_img_path],  # Guides first
+        label=f"locate ALL {len(all_panel_names)} panels"
+    )</code></pre>
+
+<figure>
+    <img src="../data/panel_box_explanation.png" alt="Panel boundary guide image">
+    <figcaption>
+        <strong>Few-shot reference: Panel boundary types.</strong>
+        Example 1 shows a panel enclosed by a dashed rectangle.
+        Example 2 shows a complex case where the boundary is formed by dashed top/bottom lines,
+        a solid right edge, and a gap + solid vertical line acting as a shared boundary.
+        Example 3 shows that non-rectangular regions should return the full outer bounding box.
+    </figcaption>
+</figure>
+
+<p>The benefits of this approach:</p>
+<ul>
+    <li><strong>Reduces prompt length</strong> — no need to describe visual concepts in words</li>
+    <li><strong>Improves consistency</strong> — the model interprets boundary types correctly across varying layouts</li>
+    <li><strong>User-customizable</strong> — swapping in new guide images adapts the system to new drawing styles, without rewriting any prompts</li>
+</ul>
+
+
+<!-- ===== TECHNIQUE 5 ===== -->
+<h2 id="technique5"><span class="section-num">5</span> Reasoning Mode — Performance vs. Cost</h2>
+
+<p>
+GPT-5's reasoning capability (<code>reasoning={"effort": "low|medium|high"}</code>) significantly affects
+both accuracy and latency. We ran systematic experiments across all four reasoning levels to quantify these trade-offs
+in two key pipeline stages: <strong>image area detection</strong> and <strong>BOM extraction</strong>.
+</p>
+
+<h3>Reasoning Mode in Image Area Detection</h3>
+
+<p>
+We tested all four reasoning effort levels (high, medium, low, none) on the image region detection stage —
+where GPT-5 detects and verifies electrical figure boundaries. Each configuration was run 3 times to ensure consistency.
+</p>
+
+<h4>Detection Quality</h4>
+
+<figure>
+    <img src="outputquality_in_image_detection_on_different_reasoning_mode.png" alt="Output quality comparison across reasoning modes">
+    <figcaption>
+        <strong>Region detection output comparison across reasoning levels</strong> (High, Medium, Low, None × 3 runs each).
+        Orange bounding boxes show detected panel areas. All reasoning levels produced comparable detection quality on this page,
+        with <code>high</code> consistently requiring fewer verification iterations (2) while <code>medium</code> and <code>low</code>
+        sometimes needed 3 iterations to converge.
+    </figcaption>
+</figure>
+
+<h4>Verification Iterations</h4>
+
+<figure>
+    <img src="verification_loop_count_on_different_reasoning mode.png" alt="Verification loop count by reasoning mode">
+    <figcaption>
+        <strong>Mean total verification iterations per page (3 runs average).</strong>
+        <code>high</code> reasoning converged in 2.0 iterations on average, while <code>medium</code> needed 2.7
+        and <code>low</code> needed 3.0. Interestingly, <code>none</code> also converged in 2.0 iterations —
+        but with significantly lower boundary accuracy.
+    </figcaption>
+</figure>
+
+<h4>LLM Processing Time</h4>
+
+<figure>
+    <img src="image_verification_time_on_diff_reasoning_mode.png" alt="Mean LLM time per reasoning mode">
+    <figcaption>
+        <strong>Mean LLM time for detection + verification (3 runs average).</strong>
+        <code>high</code> and <code>medium</code> are dominated by verification time (~170s),
+        while <code>low</code> drops to ~52s and <code>none</code> to ~15s.
+        Detection time itself is negligible across all modes.
+    </figcaption>
+</figure>
+
+<figure>
+    <img src="missing_image_detection_time_in_diff_reasonig_mode..png" alt="Per-run detection and verification time breakdown">
+    <figcaption>
+        <strong>Per-run LLM time breakdown: detection (gray) vs. verification (red).</strong>
+        The time cost scales dramatically — <code>high</code>/<code>medium</code> runs range from 140–215s total,
+        <code>low</code> stabilizes around 48–54s, and <code>none</code> completes in just 13–17s.
+        The per-crop iteration chart (top) confirms all modes detect the same regions, but differ in convergence speed.
+    </figcaption>
+</figure>
+
+<div class="callout success">
+    <p><strong>Finding:</strong> For image area detection, <code>low</code> reasoning is the optimal choice.
+    It achieves the same detection quality as <code>high</code>/<code>medium</code> at <strong>~3× less time</strong>,
+    with only 1 additional verification iteration on average. <code>none</code> is fastest but produces less precise boundaries.</p>
+</div>
+
+<h3>Reasoning Mode in BOM Extraction</h3>
+
+<p>
+For the downstream BOM extraction stage — where GPT-5 reads component lists from cropped panel images —
+the reasoning impact is more pronounced on accuracy:
+</p>
+
+<figure>
+    <img src="reasoning_med vs none in bom extraction.png" alt="Reasoning mode accuracy vs time in BOM extraction">
+    <figcaption>
+        <strong>Time vs. Accuracy trade-off: Low vs. Medium reasoning effort across 3 runs each.</strong>
+        Medium reasoning consistently achieves higher accuracy (~89–91%) at the cost of longer processing time (~3,700–4,100s),
+        while Low reasoning completes faster (~2,200–2,400s) but plateaus around 86%.
+    </figcaption>
+</figure>
+
+<table>
+    <thead>
+        <tr><th>Reasoning Effort</th><th>Accuracy</th><th>Processing Time</th></tr>
+    </thead>
+    <tbody>
+        <tr><td>Low</td><td>~86%</td><td>~2,200–2,400s</td></tr>
+        <tr><td>Medium</td><td>~89–91%</td><td>~3,700–4,100s</td></tr>
+        <tr><td>High</td><td>—</td><td>Timeout</td></tr>
+    </tbody>
+</table>
+
+<h3>Recommended Configurations</h3>
+
+<table>
+    <thead>
+        <tr><th>Pipeline Stage</th><th>Recommended Effort</th><th>Rationale</th></tr>
+    </thead>
+    <tbody>
+        <tr><td>Image region detection</td><td><code>low</code></td><td>Same quality as high/medium at ~3× less cost</td></tr>
+        <tr><td>Region verification</td><td><code>low</code></td><td>Sufficient with visual context (grid overlays)</td></tr>
+        <tr><td>BOM extraction</td><td><code>medium</code></td><td>+3–5% accuracy over low; high causes timeouts</td></tr>
+        <tr><td>Rich visual guidance provided</td><td><code>low</code> or <code>none</code></td><td>Visual context compensates for reduced reasoning</td></tr>
+    </tbody>
+</table>
+
+<div class="callout">
+    <p><strong>Key insight:</strong> Different pipeline stages benefit from different reasoning levels.
+    Use <code>low</code> for spatially-grounded tasks (detection, verification) where visual context is rich,
+    and <code>medium</code> for semantically-demanding tasks (BOM extraction) where reading precision matters.
+    Optimize inputs before scaling compute.</p>
+</div>
+
+
+<!-- ===== TECHNIQUE 6 ===== -->
+<h2 id="technique6"><span class="section-num">6</span> Expert-in-the-Loop Prompt Refinement</h2>
+
+<p>
+The single largest accuracy jump came not from any algorithmic change, but from a <strong>structured feedback loop
+with domain experts</strong>.
+</p>
+
+<figure>
+    <img src="prompt_improvements.png" alt="Expert-in-the-Loop prompt refinement cycle">
+    <figcaption>
+        <strong>Expert-in-the-Loop prompt refinement cycle.</strong>
+        GPT-5 extraction results are reviewed by a domain expert — with or without explicit error annotation —
+        and fed into a GPT-5 assisted error analysis step that identifies recurring error patterns.
+        The insights are translated into concrete prompt improvements, which feed back into the next extraction run.
+    </figcaption>
+</figure>
+
+<p>The loop works as follows:</p>
+<ol>
+    <li><strong>Extract:</strong> GPT-5 extracts BOM results from each cropped panel image</li>
+    <li><strong>Review:</strong> A domain expert reviews the output and flags incorrect entries (annotation is optional — even a simple pass/fail review is sufficient)</li>
+    <li><strong>Analyze:</strong> GPT-5 analyzes the error patterns to suggest concrete prompt improvements</li>
+    <li><strong>Refine:</strong> The refined prompt feeds back into the next extraction run</li>
+</ol>
+
+<div class="callout success">
+    <p>This feedback loop drove a <strong>+5.43% overall accuracy improvement</strong> (88.78% → 94.21%) over the
+    course of the project. The improvement varied by diagram section — some improved by nearly 10%, while one
+    slightly regressed due to over-tuning.</p>
+</div>
+
+
+<!-- ===== RESULTS ===== -->
+<h2 id="results">BOM Extraction Results</h2>
+
+<table>
+    <thead>
+        <tr><th>Metric</th><th>Value</th></tr>
+    </thead>
+    <tbody>
+        <tr><td>Overall accuracy</td><td><strong>94.21%</strong></td></tr>
+        <tr><td>Panels processed</td><td>53</td></tr>
+        <tr><td>Materials extracted</td><td>346</td></tr>
+        <tr><td>Correctly identified</td><td>277 / 294</td></tr>
+        <tr><td>Total processing time</td><td>~62 min (from pre-cropped panels)</td></tr>
+    </tbody>
+</table>
+
+<p>
+Despite strong overall accuracy, three <strong>recurring error patterns</strong> were identified:
+</p>
+
+<h4>1. Misreading of Domain Abbreviations</h4>
+<p>
+<code>10CCT 1EA</code> (10 circuits, quantity 1) was extracted as <code>CCT 10 EA</code> — numeric prefix and abbreviation
+swapped in meaning.
+</p>
+
+<h4>2. Multiplier Misinterpretation in 3-Phase Configurations</h4>
+<p>
+<code>CTx2 / SAx3</code> suffix notation was sometimes treated as a component name rather than a quantity multiplier —
+resulting in <code>PTx3 6EA</code> instead of the correct <code>PTx3 2EA</code>.
+</p>
+
+<h4>3. Spec vs. Quantity Confusion</h4>
+<p>
+Electrical rating numbers appearing alongside component entries were occasionally mistaken for quantity values.
+</p>
+
+
+<!-- ===== DESIGN PRINCIPLES ===== -->
+<h2 id="principles">System Design Principles</h2>
+
+<div class="takeaway-grid">
+    <div class="takeaway-card">
+        <h4>🛡️ Reliability</h4>
+        <p>Each stage has a single well-defined responsibility. When one approach fails, a fallback is always
+        in place: GPT-5 fills in where DI detection misses, OCR coordinates back up LLM name candidates,
+        and the verification loop catches what initial extraction misses.</p>
+    </div>
+    <div class="takeaway-card">
+        <h4>🔒 Consistency</h4>
+        <p><code>temperature=0</code> for all non-reasoning calls. Each experiment was run multiple times and averaged
+        to ensure improvements reflected genuine signal, not lucky runs.</p>
+    </div>
+    <div class="takeaway-card">
+        <h4>🌐 Generality</h4>
+        <p>Multi-layer fallback: drawings come in many forms — some have rich OCR text, others are scanned images.
+        Each stage degrades gracefully rather than failing hard.</p>
+    </div>
+    <div class="takeaway-card">
+        <h4>🔧 Extensibility</h4>
+        <p>Domain experts can refine behavior at any time through additional prompting and few-shot examples,
+        without touching the underlying code.</p>
+    </div>
+</div>
+
+
+<!-- ===== KEY TAKEAWAYS ===== -->
+<h2 id="takeaways">Key Takeaways</h2>
+
+<ol>
+    <li>
+        <strong>Decompose aggressively.</strong>
+        Stage-wise processing with scoped inputs is not just better than whole-page inference —
+        it's the difference between working and not working.
+    </li>
+    <li>
+        <strong>Visual context beats reasoning effort.</strong>
+        Grid overlays and few-shot images reduce the model's reliance on expensive reasoning modes.
+        Optimize inputs before scaling compute.
+    </li>
+    <li>
+        <strong>Verify, but stop early.</strong>
+        Self-correction loops consistently improve accuracy — but accumulated context can confuse the model.
+        Oscillation detection and early stopping are as important as the loop itself.
+    </li>
+    <li>
+        <strong>Hybrid always wins.</strong>
+        Azure DI for precise text locations, GPT-5 for semantic understanding.
+        Pure LLM solutions lose on precision-critical tasks.
+    </li>
+    <li>
+        <strong>Domain expertise belongs in the prompt.</strong>
+        The largest accuracy gain (+5.43%) came from the expert feedback loop — not from any algorithmic change.
+        AI engineering and domain engineering are inseparable.
+    </li>
+</ol>
+
+
+<!-- ===== WHAT'S NEXT ===== -->
+<h2 id="next">What's Next</h2>
+
+<ul>
+    <li>Tighter integration with native CAD vector data (SVG line clustering) for higher geometric precision</li>
+    <li>AI-assisted human review interface to streamline the expert feedback loop</li>
+    <li>Smarter handling of 3-phase quantity notation and electrical specification fields</li>
+    <li>Automated evaluation harness for continuous prompt improvement</li>
+</ul>
+
+<hr style="margin: 40px 0; border: none; border-top: 1px solid var(--border);">
+
+<p style="text-align: center; font-size: 0.9rem; color: var(--gray);">
+    <strong>Stack:</strong> Azure OpenAI GPT-5, Azure Document Intelligence &nbsp;|&nbsp;
+    <strong>Framework:</strong> Python, FastAPI, Streamlit &nbsp;|&nbsp;
+    <strong>PDF Processing:</strong> PyMuPDF
+</p>
+
+</article>
+</div>
+
+<footer>
+    <p>Built with Azure OpenAI and Azure Document Intelligence &nbsp;|&nbsp; <a href="https://azure.microsoft.com/en-us/products/ai-services/openai-service">Azure OpenAI Service</a></p>
+</footer>
+
+<script>
+    mermaid.initialize({
+        startOnLoad: true,
+        theme: 'default',
+        flowchart: {
+            useMaxWidth: true,
+            htmlLabels: true,
+            curve: 'basis'
+        },
+        securityLevel: 'strict'
+    });
+</script>
+
+</body>
+</html>

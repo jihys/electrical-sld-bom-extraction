@@ -1,0 +1,1075 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Practical Techniques for Extracting Structured Data from Complex CAD Drawings with GPT-5</title>
+    <style>
+        :root {
+            --ms-blue: #0078D4;
+            --ms-blue-dark: #005A9E;
+            --ms-blue-light: #DEECF9;
+            --ms-blue-bg: #F3F9FF;
+            --text: #323130;
+            --text-secondary: #605E5C;
+            --text-light: #A19F9D;
+            --bg: #ffffff;
+            --bg-alt: #FAF9F8;
+            --border: #EDEBE9;
+            --border-dark: #C8C6C4;
+            --code-bg: #F3F2F1;
+            --green: #107C10;
+            --green-light: #DFF6DD;
+            --orange: #CA5010;
+            --orange-light: #FFF4CE;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
+            color: var(--text);
+            background: var(--bg);
+            line-height: 1.8;
+            font-size: 16px;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* ── MS Blog Header ── */
+        .ms-topbar { background: var(--ms-blue); height: 4px; }
+        .ms-header {
+            background: var(--bg);
+            border-bottom: 1px solid var(--border);
+            padding: 16px 0;
+        }
+        .ms-header .container { display: flex; align-items: center; gap: 12px; }
+        .ms-header .ms-logo { font-weight: 700; font-size: 1rem; color: var(--text); letter-spacing: -0.3px; }
+        .ms-header .ms-logo span { color: var(--ms-blue); }
+        .ms-header .ms-category { color: var(--text-secondary); font-size: 0.85rem; }
+        .ms-header .ms-category::before { content: '›'; margin: 0 8px; color: var(--text-light); }
+
+        /* ── Layout ── */
+        .container { max-width: 800px; margin: 0 auto; padding: 0 24px; }
+
+        /* ── Article Header ── */
+        .article-header { padding: 48px 0 0; }
+        .article-header h1 {
+            font-size: 2.2rem; font-weight: 600; line-height: 1.3;
+            color: var(--text); margin-bottom: 16px; letter-spacing: -0.5px;
+        }
+        .article-header .subtitle {
+            font-size: 1.15rem; color: var(--text-secondary); margin-bottom: 24px; line-height: 1.6;
+        }
+        .article-meta {
+            display: flex; align-items: center; gap: 12px;
+            padding: 16px 0 32px; border-bottom: 1px solid var(--border);
+            font-size: 0.88rem; color: var(--text-secondary);
+        }
+        .article-meta .author-avatar {
+            width: 40px; height: 40px; border-radius: 50%; background: var(--ms-blue);
+            color: #fff; display: flex; align-items: center; justify-content: center;
+            font-weight: 600; font-size: 0.9rem;
+        }
+        .article-meta .author-info strong { display: block; color: var(--text); font-weight: 600; }
+        .tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 16px; }
+        .tag {
+            background: var(--ms-blue-light); color: var(--ms-blue-dark);
+            padding: 3px 12px; border-radius: 4px; font-size: 0.78rem; font-weight: 500;
+        }
+
+        /* ── Typography ── */
+        article { padding: 40px 0 60px; }
+        h2 { font-size: 1.65rem; font-weight: 600; margin: 48px 0 16px; color: var(--text); letter-spacing: -0.3px; }
+        h3 { font-size: 1.2rem; font-weight: 600; margin: 32px 0 10px; color: var(--text); }
+        h4 { font-size: 1.02rem; font-weight: 600; margin: 24px 0 6px; color: var(--text); }
+        p { margin: 0 0 16px; color: var(--text-secondary); }
+        strong { color: var(--text); }
+        ul, ol { margin: 0 0 18px 24px; color: var(--text-secondary); }
+        li { margin-bottom: 5px; }
+        hr.section-break { border: none; border-top: 1px solid var(--border); margin: 48px 0; }
+
+        /* ── Code ── */
+        pre {
+            background: var(--code-bg); border: 1px solid var(--border); border-radius: 6px;
+            padding: 18px 22px; overflow-x: auto; margin: 14px 0 22px;
+            font-size: 0.85rem; line-height: 1.65;
+        }
+        code { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; font-size: 0.88em; }
+        p code, li code, td code {
+            background: var(--code-bg); border: 1px solid var(--border); padding: 1px 5px;
+            border-radius: 3px; font-size: 0.84em; color: var(--ms-blue-dark);
+        }
+
+        /* ── Figures ── */
+        figure { margin: 24px 0; text-align: center; }
+        figure img { max-width: 100%; border-radius: 4px; border: 1px solid var(--border); }
+        figcaption {
+            font-size: 0.84rem; color: var(--text-light); margin-top: 8px;
+            max-width: 680px; margin-left: auto; margin-right: auto; line-height: 1.5;
+        }
+        figcaption strong.fig-num { color: var(--text-secondary); }
+
+        /* ── Callouts ── */
+        .callout { background: #F3F9FF; border-left: 4px solid #0078D4; padding: 16px 20px; border-radius: 0 4px 4px 0; margin: 18px 0; }
+        .callout p { margin: 0; color: #323130; font-size: 0.95rem; }
+        .callout-warning { background: #FFF4CE; border-left: 4px solid #CA5010; padding: 16px 20px; border-radius: 0 4px 4px 0; margin: 18px 0; }
+        .callout-warning p { margin: 0; color: #323130; font-size: 0.95rem; }
+        .callout-success { background: #DFF6DD; border-left: 4px solid #107C10; padding: 16px 20px; border-radius: 0 4px 4px 0; margin: 18px 0; }
+        .callout-success p { margin: 0; color: #323130; font-size: 0.95rem; }
+
+        /* ── Tables ── */
+        table { width: 100%; border-collapse: collapse; margin: 16px 0 22px; font-size: 0.92rem; }
+        th {
+            background: var(--bg-alt); font-weight: 600; text-align: left;
+            padding: 10px 14px; border-bottom: 2px solid var(--border-dark);
+            color: var(--text); font-size: 0.88rem;
+        }
+        td { padding: 9px 14px; border-bottom: 1px solid var(--border); color: var(--text-secondary); }
+        tr:hover td { background: var(--bg-alt); }
+
+        /* ── Pipeline Diagram (CSS) ── */
+        .pipeline { display: flex; flex-direction: column; gap: 0; margin: 24px 0; position: relative; }
+        .pipeline::before {
+            content: ''; position: absolute; left: 28px; top: 12px; bottom: 12px;
+            width: 3px; background: var(--border-dark); border-radius: 2px;
+        }
+        .pipe-stage { display: flex; align-items: flex-start; gap: 18px; padding: 10px 0; position: relative; z-index: 1; }
+        .pipe-num {
+            width: 56px; min-width: 56px; height: 36px;
+            display: flex; align-items: center; justify-content: center;
+            border-radius: 18px; font-weight: 700; font-size: 0.82rem; color: #fff;
+        }
+        .pipe-num.t-llm { background: var(--ms-blue); }
+        .pipe-num.t-di { background: var(--orange); }
+        .pipe-num.t-hybrid { background: #7719AA; }
+        .pipe-num.t-rule { background: #6B6B6B; }
+        .pipe-body {
+            flex: 1; background: var(--bg); border: 1px solid var(--border);
+            border-radius: 6px; padding: 12px 16px;
+        }
+        .pipe-body .pipe-title { font-weight: 600; font-size: 0.95rem; color: var(--text); margin-bottom: 4px; }
+        .pipe-body .pipe-desc { font-size: 0.84rem; color: var(--text-secondary); margin: 0; line-height: 1.5; }
+        .pipe-body .pipe-tools { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+        .pipe-tool-tag { font-size: 0.72rem; padding: 2px 8px; border-radius: 3px; font-weight: 500; }
+        .pipe-tool-tag.llm { background: var(--ms-blue-light); color: var(--ms-blue-dark); }
+        .pipe-tool-tag.di { background: #FFE7D6; color: #8A3300; }
+        .pipe-tool-tag.rule { background: #F3F2F1; color: #605E5C; }
+
+        /* ── Two-column ── */
+        .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 0; }
+        .two-col > div { background: var(--bg-alt); border: 1px solid var(--border); border-radius: 6px; padding: 16px; }
+        .two-col h4 { margin-top: 0; }
+
+        /* ── Takeaway cards ── */
+        .takeaway-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 18px 0; }
+        .takeaway-card { background: var(--bg-alt); border: 1px solid var(--border); border-radius: 6px; padding: 18px; }
+        .takeaway-card h4 { margin: 0 0 6px; font-size: 0.95rem; color: var(--ms-blue); }
+        .takeaway-card p { margin: 0; font-size: 0.88rem; }
+
+        /* ── Technique box ── */
+        .technique-box { background: var(--bg-alt); border: 1px solid var(--border); border-radius: 6px; padding: 22px; margin: 18px 0; }
+        .technique-box h4 { margin-top: 0; color: var(--ms-blue); }
+
+        /* ── TOC ── */
+        .toc { background: var(--bg-alt); border: 1px solid var(--border); border-radius: 6px; padding: 20px 24px; margin: 28px 0; }
+        .toc h3 { margin: 0 0 10px; font-size: 1rem; }
+        .toc ol { margin: 0; padding-left: 20px; }
+        .toc li { margin-bottom: 3px; font-size: 0.92rem; }
+        .toc a { color: var(--ms-blue); text-decoration: none; }
+        .toc a:hover { text-decoration: underline; }
+
+        /* ── Legend ── */
+        .legend-row { display: flex; gap: 16px; flex-wrap: wrap; margin: 8px 0 24px; font-size: 0.82rem; color: var(--text-secondary); }
+        .legend-row span { display: flex; align-items: center; gap: 4px; }
+        .ldot { display: inline-block; width: 12px; height: 12px; border-radius: 3px; }
+
+        /* ── Footer ── */
+        footer {
+            background: var(--bg-alt); border-top: 1px solid var(--border);
+            text-align: center; padding: 24px 0; font-size: 0.82rem; color: var(--text-light);
+        }
+        footer a { color: var(--ms-blue); text-decoration: none; }
+
+        /* ── Responsive ── */
+        @media (max-width: 768px) {
+            .article-header h1 { font-size: 1.6rem; }
+            .takeaway-grid, .two-col { grid-template-columns: 1fr; }
+            pre { padding: 14px 16px; font-size: 0.82rem; }
+            .pipeline::before { left: 24px; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="ms-topbar"></div>
+<header class="ms-header">
+    <div class="container">
+        <div class="ms-logo"><span>Microsoft</span> Tech Blog</div>
+        <span class="ms-category">AI + Machine Learning</span>
+        <span class="ms-category">Azure OpenAI</span>
+    </div>
+</header>
+
+<div class="container">
+<div class="article-header">
+    <h1>Practical Techniques for Extracting Structured Data from Complex CAD Drawings with GPT-5</h1>
+    <p class="subtitle">
+        What we learned building a multi-stage pipeline that combines vision LLMs, OCR, and iterative self-correction
+        to extract Bills of Materials from electrical single-line diagrams.
+    </p>
+    <div class="article-meta">
+        <div class="author-avatar">HC</div>
+        <div class="author-info">
+            <strong>Hyo Choi</strong>
+            March 2026 &nbsp;·&nbsp; 18 min read
+        </div>
+    </div>
+    <div class="tags">
+        <span class="tag">Azure OpenAI</span>
+        <span class="tag">GPT-5</span>
+        <span class="tag">Document Intelligence</span>
+        <span class="tag">Computer Vision</span>
+        <span class="tag">Prompt Engineering</span>
+        <span class="tag">CAD Image Understanding</span>
+    </div>
+</div>
+</div>
+
+<div class="container">
+<article>
+
+<nav class="toc">
+    <h3>In this article</h3>
+    <ol>
+        <li><a href="#problem">The Problem</a></li>
+        <li><a href="#architecture">Pipeline Architecture: Divide and Conquer</a></li>
+        <li><a href="#technique1">DI-First Detection with Targeted LLM Supplement</a></li>
+        <li><a href="#technique2">Hybrid LLM + OCR for Text Localization</a></li>
+        <li><a href="#technique3">Iterative Locate → Verify with Oscillation Guard</a></li>
+        <li><a href="#technique4">Few-Shot Visual Prompting</a></li>
+        <li><a href="#technique5">Reasoning Mode — Performance vs. Cost</a></li>
+        <li><a href="#technique6">SVG Vector Data for Boundary Detection</a></li>
+        <li><a href="#results">Results &amp; Error Analysis</a></li>
+        <li><a href="#takeaways">Key Takeaways</a></li>
+    </ol>
+</nav>
+
+
+<!-- ═══ THE PROBLEM ═══ -->
+<h2 id="problem">The Problem</h2>
+
+<p>
+Electrical engineering drawings — especially single-line diagrams (SLDs) — are notoriously hard to parse programmatically.
+They combine dense symbols, small text, and complex geometric structures, all varying in style across documents and vendors.
+</p>
+
+<figure>
+    <img src="sld_example_page1.png" alt="Example electrical single-line diagram">
+    <figcaption><strong class="fig-num">Figure 1.</strong> A typical electrical single-line diagram. A single page contains multiple panel regions (HV, TR, LV, GCP),
+    each with dozens of electrical components, connection lines, and specification text — all of which must be
+    correctly identified and assigned to the right panel for BOM extraction.</figcaption>
+</figure>
+
+<p>
+Traditionally, extracting a Bill of Materials (BOM) from these drawings has been a manual task — engineers would read
+through each diagram page by page and transcribe component lists by hand. It's time-consuming, error-prone, and doesn't scale.
+</p>
+<p>
+The obvious question: <strong>can a Vision Language Model automate this?</strong>
+We had to rely primarily on the visual content of PDF-converted images alone — without guaranteed access to CAD vector data
+or metadata. That constraint shaped every technique described in this post.
+</p>
+
+<div style="background:#FFF4CE; border-left:4px solid #CA5010; padding:16px 20px; border-radius:0 4px 4px 0; margin:18px 0;">
+    <p style="margin:0; color:#323130; font-size:0.95rem;"><strong style="color:#CA5010;">Warning:</strong> Why naive LLM inference fails: Feeding a full diagram page to an LLM and asking for a BOM fails catastrophically — too much visual complexity in a single context. Components get missed, hallucinated, or assigned to the wrong panel.</p>
+</div>
+
+<p>
+This post shares the practical techniques we discovered while building a pipeline to solve this problem. The methods are general — applicable to any task that requires extracting structured information from visually complex technical documents.
+</p>
+
+
+<!-- ═══ ARCHITECTURE ═══ -->
+<h2 id="architecture">Pipeline Architecture: Divide and Conquer</h2>
+
+<p>
+The core insight: <strong>the unit of analysis must be the panel, not the page.</strong>
+</p>
+<p>
+A single diagram page can contain dozens of panels, each representing a distinct electrical cabinet with its own components.
+Asking a model to extract a complete BOM from an entire page is asking it to simultaneously locate, read, and count every
+component across all panels — a task that proved too complex even for GPT-5.
+</p>
+<p>
+The solution was to first identify and crop each panel as an independent region, then extract the BOM panel by panel.
+This transformed an intractable whole-page problem into a series of manageable, well-scoped sub-tasks.
+</p>
+
+<figure>
+<svg viewBox="0 0 800 520" xmlns="http://www.w3.org/2000/svg" style="max-width:100%; height:auto; font-family:'Segoe UI',sans-serif;">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#C8C6C4"/>
+    </marker>
+    <filter id="shadow" x="-2%" y="-2%" width="104%" height="108%">
+      <feDropShadow dx="0" dy="1" stdDeviation="2" flood-opacity="0.08"/>
+    </filter>
+  </defs>
+
+  <!-- Connector lines -->
+  <line x1="400" y1="82" x2="400" y2="108" stroke="#C8C6C4" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="400" y1="192" x2="400" y2="218" stroke="#C8C6C4" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="400" y1="302" x2="400" y2="328" stroke="#C8C6C4" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="400" y1="412" x2="400" y2="438" stroke="#C8C6C4" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- S1: Page Segmentation -->
+  <g filter="url(#shadow)">
+    <rect x="80" y="10" width="640" height="72" rx="8" fill="#fff" stroke="#EDEBE9" stroke-width="1.5"/>
+    <rect x="80" y="10" width="56" height="72" rx="8" fill="#6B6B6B"/>
+    <rect x="108" y="10" width="28" height="72" fill="#6B6B6B"/>
+    <text x="108" y="53" text-anchor="middle" fill="#fff" font-weight="700" font-size="14">S1</text>
+    <text x="160" y="38" fill="#323130" font-weight="600" font-size="15">Page Segmentation</text>
+    <text x="160" y="58" fill="#605E5C" font-size="12">Convert PDF → high-resolution PNG &amp; SVG per page, DPI auto-computed from font size</text>
+    <rect x="648" y="30" width="58" height="22" rx="4" fill="#F3F2F1"/>
+    <text x="677" y="45" text-anchor="middle" fill="#605E5C" font-size="10" font-weight="500">PyMuPDF</text>
+  </g>
+
+  <!-- S2: Figure Detection -->
+  <g filter="url(#shadow)">
+    <rect x="80" y="110" width="640" height="82" rx="8" fill="#fff" stroke="#EDEBE9" stroke-width="1.5"/>
+    <rect x="80" y="110" width="56" height="82" rx="8" fill="#CA5010"/>
+    <rect x="108" y="110" width="28" height="82" fill="#CA5010"/>
+    <text x="108" y="157" text-anchor="middle" fill="#fff" font-weight="700" font-size="14">S2</text>
+    <text x="160" y="140" fill="#323130" font-weight="600" font-size="15">Figure Detection (2-Pass)</text>
+    <text x="160" y="160" fill="#605E5C" font-size="12">Azure DI detects figure regions → white-fill → re-detect missed figures.</text>
+    <text x="160" y="176" fill="#605E5C" font-size="12">GPT-5 supplements remaining gaps.</text>
+    <rect x="536" y="133" width="130" height="22" rx="4" fill="#FFE7D6"/>
+    <text x="601" y="148" text-anchor="middle" fill="#8A3300" font-size="10" font-weight="500">Azure Document Intelligence</text>
+    <rect x="672" y="133" width="36" height="22" rx="4" fill="#DEECF9"/>
+    <text x="690" y="148" text-anchor="middle" fill="#005A9E" font-size="10" font-weight="500">GPT-5</text>
+  </g>
+
+  <!-- S3: Panel Name Extraction -->
+  <g filter="url(#shadow)">
+    <rect x="80" y="220" width="640" height="82" rx="8" fill="#fff" stroke="#EDEBE9" stroke-width="1.5"/>
+    <rect x="80" y="220" width="56" height="82" rx="8" fill="#7719AA"/>
+    <rect x="108" y="220" width="28" height="82" fill="#7719AA"/>
+    <text x="108" y="267" text-anchor="middle" fill="#fff" font-weight="700" font-size="14">S3</text>
+    <text x="160" y="250" fill="#323130" font-weight="600" font-size="15">Panel Name Extraction &amp; Matching</text>
+    <text x="160" y="270" fill="#605E5C" font-size="12">GPT-5 extracts names from tiles → hallucination guard via DI OCR</text>
+    <text x="160" y="286" fill="#605E5C" font-size="12">→ 6-pass rule engine matches names to bounding boxes.</text>
+    <rect x="504" y="243" width="64" height="22" rx="4" fill="#DEECF9"/>
+    <text x="536" y="258" text-anchor="middle" fill="#005A9E" font-size="10" font-weight="500">GPT-5 tile</text>
+    <rect x="574" y="243" width="56" height="22" rx="4" fill="#FFE7D6"/>
+    <text x="602" y="258" text-anchor="middle" fill="#8A3300" font-size="10" font-weight="500">DI OCR</text>
+    <rect x="636" y="243" width="72" height="22" rx="4" fill="#F3F2F1"/>
+    <text x="672" y="258" text-anchor="middle" fill="#605E5C" font-size="10" font-weight="500">6-pass rules</text>
+  </g>
+
+  <!-- S4: Panel Area Segmentation & Bay Split -->
+  <g filter="url(#shadow)">
+    <rect x="80" y="330" width="640" height="82" rx="8" fill="#fff" stroke="#EDEBE9" stroke-width="1.5"/>
+    <rect x="80" y="330" width="56" height="82" rx="8" fill="#0078D4"/>
+    <rect x="108" y="330" width="28" height="82" fill="#0078D4"/>
+    <text x="108" y="377" text-anchor="middle" fill="#fff" font-weight="700" font-size="14">S4</text>
+    <text x="160" y="360" fill="#323130" font-weight="600" font-size="15">Panel Area Segmentation &amp; Bay Split</text>
+    <text x="160" y="380" fill="#605E5C" font-size="12">Iterative Locate → Verify loop (max 10 attempts) with oscillation detection.</text>
+    <text x="160" y="396" fill="#605E5C" font-size="12">Subdivide panels into individual bays. Batch-mode: all panels per page in a single LLM call.</text>
+    <rect x="568" y="353" width="80" height="22" rx="4" fill="#DEECF9"/>
+    <text x="608" y="368" text-anchor="middle" fill="#005A9E" font-size="10" font-weight="500">GPT-5 locate+verify</text>
+    <rect x="654" y="353" width="54" height="22" rx="4" fill="#F3F2F1"/>
+    <text x="681" y="368" text-anchor="middle" fill="#605E5C" font-size="10" font-weight="500">Osc. guard</text>
+  </g>
+
+  <!-- S5: BOM Extraction -->
+  <g filter="url(#shadow)">
+    <rect x="80" y="440" width="640" height="72" rx="8" fill="#fff" stroke="#EDEBE9" stroke-width="1.5"/>
+    <rect x="80" y="440" width="56" height="72" rx="8" fill="#0078D4"/>
+    <rect x="108" y="440" width="28" height="72" fill="#0078D4"/>
+    <text x="108" y="483" text-anchor="middle" fill="#fff" font-weight="700" font-size="14">S5</text>
+    <text x="160" y="468" fill="#323130" font-weight="600" font-size="15">BOM Extraction</text>
+    <text x="160" y="488" fill="#605E5C" font-size="12">Extract component list per bay → structured BOM output.</text>
+    <rect x="648" y="460" width="60" height="22" rx="4" fill="#DEECF9"/>
+    <text x="678" y="475" text-anchor="middle" fill="#005A9E" font-size="10" font-weight="500">GPT-5 BOM</text>
+  </g>
+
+  <!-- Legend -->
+  <rect x="220" y="2" width="10" height="10" rx="2" fill="#0078D4"/>
+  <text x="234" y="11" fill="#605E5C" font-size="10">GPT-5 (Vision LLM)</text>
+  <rect x="340" y="2" width="10" height="10" rx="2" fill="#CA5010"/>
+  <text x="354" y="11" fill="#605E5C" font-size="10">Azure Document Intelligence</text>
+  <rect x="510" y="2" width="10" height="10" rx="2" fill="#7719AA"/>
+  <text x="524" y="11" fill="#605E5C" font-size="10">Hybrid</text>
+  <rect x="580" y="2" width="10" height="10" rx="2" fill="#6B6B6B"/>
+  <text x="594" y="11" fill="#605E5C" font-size="10">Rule-based</text>
+</svg>
+<figcaption><strong class="fig-num">Figure 2.</strong> Five-stage pipeline architecture. Each stage is color-coded by its primary tool:
+rule-based (gray), Azure Document Intelligence (orange), hybrid LLM+OCR (purple), and GPT-5 vision (blue).
+Tool tags on the right indicate specific components used at each stage.</figcaption>
+</figure>
+
+
+<hr class="section-break">
+
+<!-- ═══ TECHNIQUE 1 ═══ -->
+<h2 id="technique1">Technique 1: DI-First Detection with Targeted LLM Supplement</h2>
+
+<p>
+The first challenge is identifying all figure regions on each page — the panel diagrams that contain the actual
+electrical components. SLD pages typically mix diagrams with title blocks, revision tables, and legend boxes
+(often along the right edge or bottom). All of these must be located before we can isolate the panels.
+</p>
+
+<p>
+The key design decision: <strong>use Azure Document Intelligence as the primary detector — and reserve the LLM
+only for gaps that DI misses.</strong> DI's <code>prebuilt-layout</code> model is fast, deterministic, and cheap
+compared to a vision LLM call. By maximizing DI coverage first, we minimize the number of expensive LLM invocations
+needed to achieve full detection.
+</p>
+
+<h3>Two-Pass DI: Catching Occluded Regions</h3>
+
+<p>
+A single DI pass often misses figures that are visually occluded by larger detected regions — particularly
+smaller panels nested within or adjacent to large ones, and tables along the page edges.
+The solution: <strong>white-fill detected regions and re-run DI</strong> to reveal what was hidden underneath.
+</p>
+
+<pre style="background:#E1DFDD; border:1px solid #C8C6C4; border-radius:6px; padding:18px 22px; overflow-x:auto; margin:14px 0 22px; font-size:0.85rem; line-height:1.65;"><code># Pass 1: Detect figures on original page
+pass1 = analyze_page(di_client, "prebuilt-layout", image_path)
+pass1_bboxes = [f["bbox"] for f in pass1["figures"]]
+
+# Pass 2: White-fill Pass 1 regions → re-detect
+if pass1_bboxes:
+    white_fill_regions(image_path, pass1_bboxes, whitefill_path)
+    pass2 = analyze_page(di_client, "prebuilt-layout", whitefill_path)
+
+    # Merge & deduplicate by IoU
+    all_figures = pass1["figures"] + pass2["figures"]
+    deduped = _dedup_figure_bboxes(all_figures, iou_threshold=0.5)</code></pre>
+
+<p>
+This two-pass approach is especially effective at catching tables and annotation blocks along the right edge
+or bottom of the page that DI initially subsumes into a single large region.
+</p>
+
+<h3>LLM Only for the Remaining Gaps</h3>
+
+<p>
+After two DI passes, most figure regions are covered. For any remaining gaps, GPT-5 is called <em>once</em>
+with the DI-detected regions marked in purple on the image. The model only needs to identify unmarked areas —
+a much simpler task than full-page detection from scratch.
+</p>
+
+<div style="background:#F3F9FF; border-left:4px solid #0078D4; padding:16px 20px; border-radius:0 4px 4px 0; margin:18px 0;">
+    <p style="margin:0; color:#323130; font-size:0.95rem;"><strong style="color:#0078D4;">Key finding:</strong> DI detection is ~10× faster and significantly cheaper per call than
+    a GPT-5 vision request. By using DI as the primary detector and LLM only for supplemental gap-filling,
+    the pipeline achieves comprehensive coverage while keeping cost and latency low.
+    The two-pass technique further reduces the LLM's burden by maximizing what DI can find on its own.</p>
+</div>
+
+
+<hr class="section-break">
+
+<!-- ═══ TECHNIQUE 2 ═══ -->
+<h2 id="technique2">Technique 2: Hybrid LLM + OCR for Text Localization</h2>
+
+<p>
+To segment panel areas, we first need to know <strong>where panel names appear in the image</strong>. Panel names act as
+anchor points — once we know their locations, we can use them as seeds to identify the boundaries of each panel region.
+</p>
+<p>
+Neither GPT-5 nor OCR alone is sufficient:
+</p>
+<ul>
+    <li><strong>GPT-5:</strong> identifies <em>what</em> the text says, but imprecise on exact pixel locations</li>
+    <li><strong>Azure Document Intelligence:</strong> precise coordinates for all text, but struggles with domain-specific abbreviations</li>
+</ul>
+<p>The solution: run both in parallel and cross-match results.</p>
+
+<figure>
+    <img src="ocr-llm-hybrid.png" alt="Hybrid LLM + OCR pipeline for panel name localization">
+    <figcaption><strong class="fig-num">Figure 3.</strong> Two parallel tracks converge into cross-matching.
+    <strong>Top:</strong> page is split into overlapping tiles → GPT-5 extracts panel name candidates per tile → aggregated and deduplicated.
+    <strong>Bottom:</strong> Azure DI extracts all text with bounding boxes → rule + GPT-5 filters by type →
+    cross-matching prioritizes rule-based alignment, with GPT-5 resolving unmatched cases.</figcaption>
+</figure>
+
+<h3>Tile-Based Name Extraction</h3>
+
+<p>
+Rather than feeding the entire page to the LLM, we split it into overlapping vertical tiles (2000px wide, 400px overlap)
+and extract panel name candidates from each tile independently. This reduces visual complexity per LLM call and improves recall.
+</p>
+
+<pre style="background:#E1DFDD; border:1px solid #C8C6C4; border-radius:6px; padding:18px 22px; overflow-x:auto; margin:14px 0 22px; font-size:0.85rem; line-height:1.65;"><code># Split page into overlapping tiles for LLM name extraction
+tiles = tile_page(image_path, tile_width=2000, overlap=400)
+
+# Extract names from each tile independently
+for tile_img, tile_coords in tiles:
+    names = extract_names_from_tile(tile_img, llm_client, deployment)
+    # LLM identifies SHORT CODES: "HV 1", "TR-2", "LV 3A"
+    # Rejects: component labels, wire tags, terminal IDs</code></pre>
+
+<figure>
+    <img src="panel_box_name_extration_with_tileing.png" alt="Tiling comparison for name extraction">
+    <figcaption><strong class="fig-num">Figure 4.</strong> Effect of tile-based extraction vs. full-page extraction. Overlapping tiles reduce visual complexity
+    per LLM call, improving panel name recall — especially for names near page edges.</figcaption>
+</figure>
+
+<h3>Hallucination Guard</h3>
+
+<p>
+LLMs sometimes fabricate panel names that don't exist in the image. We cross-validate all LLM-extracted names against
+the DI OCR text pool using fuzzy matching:
+</p>
+
+<pre style="background:#E1DFDD; border:1px solid #C8C6C4; border-radius:6px; padding:18px 22px; overflow-x:auto; margin:14px 0 22px; font-size:0.85rem; line-height:1.65;"><code>def hallucination_guard(names, di_lines):
+    verified = []
+    for name in names:
+        if _name_in_ocr(name, ocr_texts):  # 3 matching modes:
+            verified.append(name)           #   1. Exact substring
+            # 2. Same length, ≤1 char diff
+            # 3. Alphanumeric stripping (ignore spaces/punctuation)
+        else:
+            print(f"  Dropped '{name}' — no OCR match")
+    return verified</code></pre>
+
+<h3>6-Pass Rule Matching Engine</h3>
+
+<p>
+Once names are verified, we locate their exact pixel positions via a cascading rule engine that matches panel names
+against DI OCR bounding boxes with decreasing confidence:
+</p>
+
+<pre style="background:#E1DFDD; border:1px solid #C8C6C4; border-radius:6px; padding:18px 22px; overflow-x:auto; margin:14px 0 22px; font-size:0.85rem; line-height:1.65;"><code>def rule_match_panel_name(panel_name, di_lines, max_merge=3):
+    # Pass 1: Exact match (case-insensitive)          → confidence 1.0
+    # Pass 2: Alphanumeric (O/0, I/1 tolerance)       → confidence 0.9
+    # Pass 3: Substring containment (≥3 chars)         → confidence 0.75
+    # Pass 4: Multi-line merge (adjacent DI lines)     → confidence 0.7
+    # Pass 5: OCR-confusable (1-char diff, v↔y, s↔5)  → confidence 0.6
+
+    # Conflict resolution: shared bbox → keep highest confidence
+    # LLM fallback: for still-unmatched names</code></pre>
+
+<div style="background:#F3F9FF; border-left:4px solid #0078D4; padding:16px 20px; border-radius:0 4px 4px 0; margin:18px 0;">
+    <p style="margin:0; color:#323130; font-size:0.95rem;"><strong style="color:#0078D4;">Key finding:</strong> The LLM identifies <em>what</em> the panel names are (semantic),
+    while Azure DI provides <em>where</em> they are (geometric). The rule engine bridges the two with
+    OCR-aware fuzzy matching. This hybrid approach is significantly more robust than either system alone.</p>
+</div>
+
+
+<hr class="section-break">
+
+<!-- ═══ TECHNIQUE 3 ═══ -->
+<h2 id="technique3">Technique 3: Iterative Locate → Verify with Oscillation Guard</h2>
+
+<p>
+With panel names located, the next challenge is identifying the full panel boundary. This is the hardest stage:
+panels can be irregularly shaped, share edges with neighbors, and have boundaries formed by a mix of dashed, solid,
+and implied lines.
+</p>
+<p>
+Rather than asking the LLM to find the boundary in one shot (which is unreliable), we implemented an
+<strong>iterative Locate → Verify correction loop</strong> with up to 10 attempts per panel.
+</p>
+
+<h3>Visual Prompt Composition</h3>
+
+<p>
+Each iteration constructs a carefully composed image for the LLM, providing spatial context through color-coded overlays:
+</p>
+
+<div class="two-col">
+    <div>
+        <h4>Locate Input</h4>
+        <ul>
+            <li><strong style="color:var(--ms-blue)">Blue box</strong> — target panel name (<code>NAME:{panel_name}</code>)</li>
+            <li><strong style="color:var(--green)">Green boxes</strong> — other panels as spatial reference</li>
+        </ul>
+    </div>
+    <div>
+        <h4>Verify Input</h4>
+        <ul>
+            <li><strong style="color:var(--orange)">Orange box</strong> — proposed panel bbox</li>
+            <li><strong style="color:var(--ms-blue)">Blue box</strong> — panel name location</li>
+            <li><strong style="color:var(--green)">Green boxes</strong> — neighboring panels</li>
+        </ul>
+    </div>
+</div>
+
+<p>The verify step analyzes each of the four edges independently:</p>
+
+<pre style="background:#E1DFDD; border:1px solid #C8C6C4; border-radius:6px; padding:18px 22px; overflow-x:auto; margin:14px 0 22px; font-size:0.85rem; line-height:1.65;"><code>// Verify response — per-edge analysis
+{
+  "valid": false,
+  "edges": {
+    "x1": { "status": "expand", "delta": -45, "corrected": 120 },
+    "y1": { "status": "ok" },
+    "x2": { "status": "shrink", "delta": -30, "corrected": 850 },
+    "y2": { "status": "expand", "delta": 60, "corrected": 1200 }
+  },
+  "corrected_bbox": [120, 200, 850, 1200]
+}</code></pre>
+
+<h3>Oscillation Detection</h3>
+
+<p>
+A critical failure mode: the LLM oscillates on an axis — expanding, then shrinking, then expanding —
+never converging. We detect this using a 3-value history per axis:
+</p>
+
+<pre style="background:#E1DFDD; border:1px solid #C8C6C4; border-radius:6px; padding:18px 22px; overflow-x:auto; margin:14px 0 22px; font-size:0.85rem; line-height:1.65;"><code># Track last 3 corrections per axis
+axis_history = {axis: [] for axis in ["x1", "y1", "x2", "y2"]}
+
+for attempt in range(1, max_tries + 1):
+    # ... locate and verify ...
+    for axis in AXES:
+        hist = axis_history[axis]
+        if len(hist) >= 3:
+            a, b, c = hist[-3:]
+            # Detect: (a < b > c) or (a > b < c) → oscillating
+            if (a < b and b > c) or (a > b and b < c):
+                corrected[axis] = hist[-2]  # Freeze at previous value</code></pre>
+
+<div style="background:#F3F9FF; border-left:4px solid #0078D4; padding:16px 20px; border-radius:0 4px 4px 0; margin:18px 0;">
+    <p style="margin:0; color:#323130; font-size:0.95rem;">The loop processes all panels on a page in <strong>batch mode</strong> — a single <code>locate-all</code> call
+    positions all panels simultaneously, reducing per-panel LLM calls from N to 1.</p>
+</div>
+
+
+<hr class="section-break">
+
+<!-- ═══ TECHNIQUE 4 ═══ -->
+<h2 id="technique4">Technique 4: Few-Shot Visual Prompting</h2>
+
+<p>
+Text prompts alone struggle to convey spatial concepts like "what a panel boundary looks like." The visual vocabulary
+of electrical drawings is too domain-specific to describe in words. The solution: provide GPT-5 with
+<strong>few-shot reference images</strong> directly in the prompt.
+</p>
+
+<pre style="background:#E1DFDD; border:1px solid #C8C6C4; border-radius:6px; padding:18px 22px; overflow-x:auto; margin:14px 0 22px; font-size:0.85rem; line-height:1.65;"><code>def locate_and_verify_batch(..., guide_image_paths=None):
+    guides = list(guide_image_paths or [])
+    # Prepend guide images before the actual input:
+    loc_raw = call_llm(
+        llm_client, deployment, locate_prompt,
+        image_paths=guides + [locate_img_path],  # Guides first
+    )</code></pre>
+
+<figure>
+    <img src="../data/panel_box_explanation.png" alt="Panel boundary guide image">
+    <figcaption><strong class="fig-num">Figure 5.</strong> Few-shot reference for panel boundary recognition.
+    Example 1: dashed rectangle enclosure. Example 2: mixed boundary with dashed lines, solid edge,
+    and gap + vertical line as shared boundary. Example 3: non-rectangular region returns the full outer bounding box.</figcaption>
+</figure>
+
+<p>The benefits:</p>
+<ul>
+    <li><strong>Reduces prompt length</strong> — no need to describe visual concepts in words</li>
+    <li><strong>Improves consistency</strong> — the model interprets boundary types correctly across varying layouts</li>
+    <li><strong>User-customizable</strong> — swapping in new guide images adapts to new drawing styles without code changes</li>
+</ul>
+
+
+<hr class="section-break">
+
+<!-- ═══ TECHNIQUE 5 ═══ -->
+<h2 id="technique5">Technique 5: Reasoning Mode — Performance vs. Cost</h2>
+
+<p>
+GPT-5's reasoning capability (<code>reasoning={"effort": "low|medium|high"}</code>) significantly affects
+both accuracy and latency. We ran systematic experiments across all four reasoning levels in two key pipeline stages:
+<strong>image area detection</strong> and <strong>BOM extraction</strong>.
+</p>
+
+<h3>Reasoning in Image Area Detection</h3>
+
+<p>
+Each reasoning level was tested 3 times on the region detection stage (GPT-5 detects and verifies figure boundaries).
+</p>
+
+<h4>Detection Quality</h4>
+
+<figure>
+    <img src="outputquality_in_image_detection_on_different_reasoning_mode.png" alt="Output quality by reasoning mode">
+    <figcaption><strong class="fig-num">Figure 6.</strong> Region detection output across reasoning levels (High, Medium, Low, None × 3 runs).
+    All levels produced comparable quality. <code>high</code> converged in fewer iterations (2),
+    while <code>medium</code>/<code>low</code> sometimes needed 3.</figcaption>
+</figure>
+
+<h4>Verification Iterations</h4>
+
+<figure>
+    <img src="verification_loop_count_on_different_reasoning mode.png" alt="Mean verification iterations per reasoning mode">
+    <figcaption><strong class="fig-num">Figure 7.</strong> Mean verification iterations per page (3 runs avg).
+    <code>high</code>: 2.0, <code>medium</code>: 2.7, <code>low</code>: 3.0, <code>none</code>: 2.0.
+    Lower reasoning needs slightly more iterations but converges to the same quality.</figcaption>
+</figure>
+
+<h4>Processing Time</h4>
+
+<figure>
+    <img src="image_verification_time_on_diff_reasoning_mode.png" alt="Mean LLM time per reasoning mode">
+    <figcaption><strong class="fig-num">Figure 8.</strong> Mean LLM time for detection + verification (3 runs avg).
+    <code>high</code>/<code>medium</code> ~170s, <code>low</code> ~52s, <code>none</code> ~15s.</figcaption>
+</figure>
+
+<div style="background:#F3F9FF; border-left:4px solid #0078D4; padding:16px 20px; border-radius:0 4px 4px 0; margin:18px 0;">
+    <p style="margin:0; color:#323130; font-size:0.95rem;"><strong style="color:#0078D4;">Key finding:</strong> All reasoning levels (<code>low</code>, <code>medium</code>, <code>high</code>) produced similar quality and noticeably better results than <code>none</code>,
+    but with increasing latency (~3× from <code>low</code> to <code>high</code>). Since there was no meaningful quality difference among reasoning levels,
+    we chose <code>low</code> as the optimal setting — <strong>getting the benefit of reasoning at minimal latency cost</strong>.</p>
+</div>
+
+<h3>Reasoning in BOM Extraction</h3>
+
+<p>
+For BOM extraction — reading component lists from cropped panel images — reasoning has a more pronounced accuracy impact:
+</p>
+
+<figure>
+    <img src="reasoning_med vs none in bom extraction.png" alt="BOM extraction: reasoning vs accuracy">
+    <figcaption><strong class="fig-num">Figure 9.</strong> Time vs. Accuracy: Low (~86%, ~2,300s) vs. Medium (~89–91%, ~3,900s) reasoning across 3 runs each.</figcaption>
+</figure>
+
+<svg viewBox="0 0 600 160" xmlns="http://www.w3.org/2000/svg" style="max-width:600px; width:100%; height:auto; font-family:'Segoe UI',sans-serif; margin:16px 0 22px;">
+  <rect x="0" y="0" width="600" height="160" rx="6" fill="#fff" stroke="#EDEBE9" stroke-width="1.5"/>
+  <!-- Header -->
+  <rect x="1" y="1" width="598" height="36" rx="6" fill="#FAF9F8"/>
+  <line x1="0" y1="37" x2="600" y2="37" stroke="#C8C6C4" stroke-width="2"/>
+  <text x="20" y="24" fill="#323130" font-weight="600" font-size="13">Reasoning Effort</text>
+  <text x="240" y="24" fill="#323130" font-weight="600" font-size="13">Accuracy</text>
+  <text x="420" y="24" fill="#323130" font-weight="600" font-size="13">Time</text>
+  <!-- Columns -->
+  <line x1="220" y1="0" x2="220" y2="160" stroke="#EDEBE9" stroke-width="1"/>
+  <line x1="400" y1="0" x2="400" y2="160" stroke="#EDEBE9" stroke-width="1"/>
+  <!-- Row 1 -->
+  <text x="20" y="64" fill="#605E5C" font-size="13">Low</text>
+  <text x="240" y="64" fill="#605E5C" font-size="13">~86%</text>
+  <text x="420" y="64" fill="#605E5C" font-size="13">~2,200–2,400s</text>
+  <line x1="0" y1="77" x2="600" y2="77" stroke="#EDEBE9" stroke-width="1"/>
+  <!-- Row 2 -->
+  <text x="20" y="104" fill="#605E5C" font-size="13">Medium</text>
+  <text x="240" y="104" fill="#605E5C" font-size="13">~89–91%</text>
+  <text x="420" y="104" fill="#605E5C" font-size="13">~3,700–4,100s</text>
+  <line x1="0" y1="117" x2="600" y2="117" stroke="#EDEBE9" stroke-width="1"/>
+  <!-- Row 3 -->
+  <text x="20" y="144" fill="#605E5C" font-size="13">High</text>
+  <text x="240" y="144" fill="#605E5C" font-size="13">—</text>
+  <text x="420" y="144" fill="#605E5C" font-size="13">Timeout</text>
+</svg>
+
+<h3>Recommended Configurations</h3>
+
+<svg viewBox="0 0 720 160" xmlns="http://www.w3.org/2000/svg" style="max-width:720px; width:100%; height:auto; font-family:'Segoe UI',sans-serif; margin:16px 0 22px;">
+  <rect x="0" y="0" width="720" height="160" rx="6" fill="#fff" stroke="#EDEBE9" stroke-width="1.5"/>
+  <!-- Header -->
+  <rect x="1" y="1" width="718" height="36" rx="6" fill="#FAF9F8"/>
+  <line x1="0" y1="37" x2="720" y2="37" stroke="#C8C6C4" stroke-width="2"/>
+  <text x="20" y="24" fill="#323130" font-weight="600" font-size="13">Pipeline Stage</text>
+  <text x="230" y="24" fill="#323130" font-weight="600" font-size="13">Recommended</text>
+  <text x="380" y="24" fill="#323130" font-weight="600" font-size="13">Rationale</text>
+  <!-- Columns -->
+  <line x1="215" y1="0" x2="215" y2="160" stroke="#EDEBE9" stroke-width="1"/>
+  <line x1="365" y1="0" x2="365" y2="160" stroke="#EDEBE9" stroke-width="1"/>
+  <!-- Row 1 -->
+  <text x="20" y="64" fill="#605E5C" font-size="13">Image region detection</text>
+  <rect x="230" y="50" width="38" height="20" rx="3" fill="#E1DFDD"/>
+  <text x="249" y="65" text-anchor="middle" fill="#005A9E" font-size="12" font-family="'Cascadia Code','Consolas',monospace">low</text>
+  <text x="380" y="64" fill="#605E5C" font-size="13">Same quality at ~3× less cost</text>
+  <line x1="0" y1="77" x2="720" y2="77" stroke="#EDEBE9" stroke-width="1"/>
+  <!-- Row 2 -->
+  <text x="20" y="104" fill="#605E5C" font-size="13">Region verification</text>
+  <rect x="230" y="90" width="38" height="20" rx="3" fill="#E1DFDD"/>
+  <text x="249" y="105" text-anchor="middle" fill="#005A9E" font-size="12" font-family="'Cascadia Code','Consolas',monospace">low</text>
+  <text x="380" y="104" fill="#605E5C" font-size="13">Sufficient with rich visual context (overlays)</text>
+  <line x1="0" y1="117" x2="720" y2="117" stroke="#EDEBE9" stroke-width="1"/>
+  <!-- Row 3 -->
+  <text x="20" y="144" fill="#605E5C" font-size="13">BOM extraction</text>
+  <rect x="230" y="130" width="62" height="20" rx="3" fill="#E1DFDD"/>
+  <text x="261" y="145" text-anchor="middle" fill="#005A9E" font-size="12" font-family="'Cascadia Code','Consolas',monospace">medium</text>
+  <text x="380" y="144" fill="#605E5C" font-size="13">+3–5% accuracy; high causes timeouts</text>
+</svg>
+
+<div style="background:#F3F9FF; border-left:4px solid #0078D4; padding:16px 20px; border-radius:0 4px 4px 0; margin:18px 0;">
+    <p style="margin:0; color:#323130; font-size:0.95rem;"><strong>Key insight:</strong> Different stages need different reasoning levels.
+    Use <code>low</code> for spatially-grounded tasks with rich visual context,
+    <code>medium</code> for semantically-demanding reading tasks.
+    <strong>Optimize inputs before scaling compute.</strong></p>
+</div>
+
+
+<hr class="section-break">
+
+<!-- ═══ TECHNIQUE 6 ═══ -->
+<h2 id="technique6">Technique 6: SVG Vector Data for Boundary Detection</h2>
+
+<p>
+PDF files converted from CAD tools often retain a vector layer beneath the raster image. We extract this SVG layer
+directly using PyMuPDF and parse out horizontal and vertical line segments from the path data.
+</p>
+
+<pre style="background:#E1DFDD; border:1px solid #C8C6C4; border-radius:6px; padding:18px 22px; overflow-x:auto; margin:14px 0 22px; font-size:0.85rem; line-height:1.65;"><code># Extract vector layer from PDF
+svg_data = page.get_svg_image()
+
+# Parse into H/V segments
+h_lines = [seg for seg in svg_segments if abs(seg.dy) < 3.0 and abs(seg.dx) >= 10.0]
+v_lines = [seg for seg in svg_segments if abs(seg.dx) < 3.0 and abs(seg.dy) >= 10.0]</code></pre>
+
+<figure>
+    <img src="panel_box_segmentation.png" alt="SVG vector boundary segmentation result">
+    <figcaption><strong class="fig-num">Figure 10.</strong> Panel regions detected via SVG vector analysis — each color represents a distinct panel boundary
+    identified through line clustering and cycle extraction, with no LLM involvement.</figcaption>
+</figure>
+
+<h3>The Problem: Too Many Lines</h3>
+
+<p>
+However, the raw output is overwhelming. A single diagram page can contain <strong>thousands of line fragments</strong> —
+component symbols, annotation lines, grid lines, and actual panel boundaries all mixed together. The challenge is
+not extraction, but filtering out the noise to isolate the lines that actually define panel boundaries.
+</p>
+
+<p>
+Our approach exploits a simple geometric property: <strong>real panel boundary lines are long, consistent, and
+concentrate in a narrow position band</strong> — unlike symbol lines, which are short and scattered. We implemented
+two algorithms to detect this pattern depending on the line style:
+</p>
+
+<figure>
+    <img src="line_clustering_filter_only.png" alt="Raw SVG line segments">
+    <figcaption><strong class="fig-num">Figure 11.</strong> Raw SVG line extraction from a single page: 15,742 horizontal + 1,106 vertical + 227 diagonal segments.
+    The length distribution (right) shows most segments are very short (symbol strokes, text) —
+    boundary lines are a tiny fraction of the total.</figcaption>
+</figure>
+
+<h3>1. Chain-Based Clustering (solid / dash-dot lines)</h3>
+
+<p>
+Scan fragments in order of position. If the next fragment is close enough, extend the current group.
+If the gap is too large, start a new one. Discard any group that is too short or too sparse to be a real boundary.
+</p>
+
+<figure>
+    <img src="line_clustering.png" alt="SVG line clustering result">
+    <figcaption><strong class="fig-num">Figure 12.</strong> After clustering: 15 horizontal lines (left) and 18 vertical lines (right), each color-coded by cluster.
+    Legend shows pixel position and segment count per cluster. The 3,604 unassigned segments (gray) are
+    symbol strokes and other non-boundary elements, filtered out.</figcaption>
+</figure>
+
+<h3>2. Density-Peak Clustering (dotted lines)</h3>
+
+<p>
+Dotted lines have gaps too large to bridge by proximity. Instead, project all fragments onto a ruler and count how many
+land at each position. Wherever fragments pile up — a spike — that's a boundary line. Find the spikes, ignore the noise.
+</p>
+
+<h3>Handling Style Variation with BoundaryStyleStrategy</h3>
+
+<p>
+Different drawings use different line styles. Rather than hardcoding parameters, we implemented a
+<code>BoundaryStyleStrategy</code> abstraction so each style gets its own tuned thresholds without touching shared logic:
+</p>
+
+<pre style="background:#E1DFDD; border:1px solid #C8C6C4; border-radius:6px; padding:18px 22px; overflow-x:auto; margin:14px 0 22px; font-size:0.85rem; line-height:1.65;"><code>class DashDotBoundaryStyle(BoundaryStyleStrategy):
+    cluster_tolerance_px = 25.0
+    first_pass_min_density = 0.20   # chain-based
+
+class DottedBoundaryStyle(BoundaryStyleStrategy):
+    cluster_tolerance_px = 14.0
+    first_pass_min_density = 0.035  # density-peak
+
+class LineBoundaryStyle(BoundaryStyleStrategy):
+    cluster_tolerance_px = 25.0
+    first_pass_min_density = 0.20   # chain-based</code></pre>
+
+<h3>Using Stage 3 Results as Seeds</h3>
+
+<p>
+To assign detected boundary lines to the correct panel, we use the panel name locations identified in Stage 3 as
+seed points — the same matched positions that came out of the GPT-5 and Azure Document Intelligence cross-matching step.
+This is where the earlier investment in precise name localization pays off: <strong>accurate seed points directly
+translate into accurate panel boundary assignments.</strong>
+</p>
+
+<pre style="background:#E1DFDD; border:1px solid #C8C6C4; border-radius:6px; padding:18px 22px; overflow-x:auto; margin:14px 0 22px; font-size:0.85rem; line-height:1.65;"><code># Primary: extract from PDF vector text
+seeds = extract_vector_text_seeds(pdf_page, panel_names)
+
+# Fallback: GPT-5 with grid overlay
+if not seeds:
+    seeds = detect_panel_seeds_with_gpt5(image_with_grid, panel_names)</code></pre>
+
+<h3>Seed-Guided Minimal Cycle Extraction</h3>
+
+<p>
+Once seed points are established, boundary assignment follows a four-step hierarchy — from strict line coverage matches
+down to relaxed overlap checks and canvas edge fallback — ensuring every panel gets a bounding box even under imperfect
+vector data.
+</p>
+
+<p>
+Beyond this hierarchical assignment, the problem can be more fundamentally formulated as <strong>seed-guided minimal
+cycle extraction in a planar graph.</strong> The SVG primitives are first converted into a graph representation, where
+nodes correspond to line endpoints and intersections, and edges represent vector segments. Each seed point acts as a
+semantic anchor indicating that the corresponding panel region must enclose it.
+</p>
+
+<p>
+For each seed, the algorithm searches for closed cycles in the planar graph that contain the seed, and selects the
+minimal enclosing cycle based on geometric criteria such as area and structural simplicity. This cycle effectively
+defines the panel boundary, even when the shape is irregular or shares edges with adjacent panels.
+</p>
+
+<pre style="background:#E1DFDD; border:1px solid #C8C6C4; border-radius:6px; padding:18px 22px; overflow-x:auto; margin:14px 0 22px; font-size:0.85rem; line-height:1.65;"><code># Build planar graph from boundary line segments
+G = build_planar_graph(boundary_chains)
+
+for panel_name, seed_point in panel_seeds:
+    # Find minimal cycle enclosing the seed point
+    cycle = find_minimal_enclosing_cycle(G, seed_point)
+    if cycle:
+        panel_regions[panel_name] = cycle_to_polygon(cycle)</code></pre>
+
+<div style="background:#F3F9FF; border-left:4px solid #0078D4; padding:16px 20px; border-radius:0 4px 4px 0; margin:18px 0;">
+    <p style="margin:0; color:#323130; font-size:0.95rem;">By combining hierarchical boundary assignment with seed-guided topological cycle extraction, the pipeline achieves
+    <strong>robust and precise panel segmentation</strong>, providing clean, context-isolated inputs for downstream
+    GPT-5-based BOM extraction.</p>
+</div>
+
+
+<hr class="section-break">
+
+<!-- ═══ RESULTS ═══ -->
+<h2 id="results">Results &amp; Error Analysis</h2>
+
+<p>
+The pipeline achieved <strong>94.21% accuracy</strong> (277/294 materials correctly extracted) across 53 panels on 4 diagram pages.
+Processing time was ~62 minutes from pre-cropped panel images.
+</p>
+
+<svg viewBox="0 0 520 240" xmlns="http://www.w3.org/2000/svg" style="max-width:520px; width:100%; height:auto; font-family:'Segoe UI',sans-serif; margin:16px 0 22px;">
+  <rect x="0" y="0" width="520" height="240" rx="6" fill="#fff" stroke="#EDEBE9" stroke-width="1.5"/>
+  <!-- Header -->
+  <rect x="1" y="1" width="518" height="36" rx="6" fill="#FAF9F8"/>
+  <line x1="0" y1="37" x2="520" y2="37" stroke="#C8C6C4" stroke-width="2"/>
+  <text x="20" y="24" fill="#323130" font-weight="600" font-size="13">Metric</text>
+  <text x="260" y="24" fill="#323130" font-weight="600" font-size="13">Value</text>
+  <!-- Column divider -->
+  <line x1="240" y1="0" x2="240" y2="240" stroke="#EDEBE9" stroke-width="1"/>
+  <!-- Row 1 -->
+  <text x="20" y="64" fill="#605E5C" font-size="13">Overall accuracy</text>
+  <text x="260" y="64" fill="#323130" font-weight="600" font-size="13">94.21%</text>
+  <line x1="0" y1="77" x2="520" y2="77" stroke="#EDEBE9" stroke-width="1"/>
+  <!-- Row 2 -->
+  <text x="20" y="104" fill="#605E5C" font-size="13">Panels processed</text>
+  <text x="260" y="104" fill="#605E5C" font-size="13">53</text>
+  <line x1="0" y1="117" x2="520" y2="117" stroke="#EDEBE9" stroke-width="1"/>
+  <!-- Row 3 -->
+  <text x="20" y="144" fill="#605E5C" font-size="13">Materials extracted</text>
+  <text x="260" y="144" fill="#605E5C" font-size="13">346</text>
+  <line x1="0" y1="157" x2="520" y2="157" stroke="#EDEBE9" stroke-width="1"/>
+  <!-- Row 4 -->
+  <text x="20" y="184" fill="#605E5C" font-size="13">Correctly identified</text>
+  <text x="260" y="184" fill="#605E5C" font-size="13">277 / 294</text>
+  <line x1="0" y1="197" x2="520" y2="197" stroke="#EDEBE9" stroke-width="1"/>
+  <!-- Row 5 -->
+  <text x="20" y="224" fill="#605E5C" font-size="13">Processing time</text>
+  <text x="260" y="224" fill="#605E5C" font-size="13">~62 min (panel images only)</text>
+</svg>
+
+<p>
+A <strong>+5.43% accuracy improvement</strong> (88.78% → 94.21%) came from iterative prompt refinement
+based on domain expert review of extraction errors — identifying recurring patterns and translating them into prompt corrections.
+</p>
+
+<figure>
+    <img src="prompt_improvements.png" alt="Prompt refinement cycle">
+    <figcaption><strong class="fig-num">Figure 13.</strong> Iterative prompt refinement: GPT-5 results → expert review → error pattern analysis → prompt corrections → re-run.</figcaption>
+</figure>
+
+<h3>Recurring Error Patterns</h3>
+
+<h4>1. Misreading of Domain Abbreviations</h4>
+<p>
+<code>10CCT 1EA</code> (10 circuits, quantity 1) → extracted as <code>CCT 10 EA</code>. Numeric prefix and abbreviation swapped.
+</p>
+
+<h4>2. Multiplier Misinterpretation in 3-Phase Configs</h4>
+<p>
+<code>CTx2 / SAx3</code> suffix treated as component name instead of quantity multiplier →
+<code>PTx3 6EA</code> instead of correct <code>PTx3 2EA</code>.
+</p>
+
+<h4>3. Spec vs. Quantity Confusion</h4>
+<p>
+Electrical rating numbers alongside component entries mistaken for quantity values.
+</p>
+
+
+<hr class="section-break">
+
+<!-- ═══ KEY TAKEAWAYS ═══ -->
+<h2 id="takeaways">Key Takeaways</h2>
+
+<p>
+<strong>Decompose aggressively.</strong> Stage-wise processing with scoped inputs is the difference between working and not working.
+Break the problem down until each sub-task is tractable for the model.
+</p>
+<p>
+<strong>Visual context beats reasoning effort.</strong> Color-coded overlays and few-shot images reduce reliance on expensive reasoning modes.
+Optimize inputs before scaling compute.
+</p>
+<p>
+<strong>Verify, but stop early.</strong> Self-correction loops improve accuracy — but accumulated context can confuse the model.
+Oscillation detection and early stopping are critical.
+</p>
+<p>
+<strong>Hybrid always wins.</strong> Azure DI for precise coordinates, GPT-5 for semantics.
+Pure LLM solutions lose on precision-critical tasks.
+</p>
+
+
+<hr class="section-break">
+
+<h2 id="try-it">Try It Yourself</h2>
+
+<p>
+The full pipeline code — including the Streamlit HITL demo, all agents, and evaluation scripts — is available on GitHub.
+Clone the repo, upload your own SLD drawings, and see the extraction pipeline in action.
+</p>
+
+<figure>
+    <img src="bom_extraction_demo.png" alt="BOM Extraction demo UI">
+    <figcaption><strong class="fig-num">Figure 14.</strong> The Streamlit HITL demo showing Step 5 — BOM Extraction results.
+    Each panel's cropped image is displayed alongside the extracted component table with device symbol, name, specification, quantity, and confidence level.</figcaption>
+</figure>
+
+<p style="text-align:center; margin:24px 0;">
+    <a href="https://github.com/jihys/electrical-sld-bom-extraction" style="display:inline-block; background:#0078D4; color:#fff; padding:12px 28px; border-radius:6px; font-weight:600; font-size:1rem; text-decoration:none;">View on GitHub →</a>
+</p>
+
+
+<hr class="section-break">
+
+<h2 id="next">What's Next</h2>
+
+<ul>
+    <li>Combining SVG vector detection (Technique 6) with LLM verification for a hybrid geometric + semantic approach</li>
+    <li>Smarter handling of 3-phase quantity notation and electrical specification fields</li>
+    <li>Automated evaluation harness for continuous prompt improvement across drawing styles</li>
+</ul>
+
+<hr class="section-break">
+
+<p style="text-align:center; font-size:0.85rem; color:var(--text-light);">
+    <strong>Stack:</strong> Azure OpenAI GPT-5 &nbsp;·&nbsp; Azure Document Intelligence &nbsp;·&nbsp; Python &nbsp;·&nbsp; Streamlit &nbsp;·&nbsp; PyMuPDF
+</p>
+
+</article>
+</div>
+
+<footer>
+    <p>Microsoft Tech Blog &nbsp;·&nbsp; Built with <a href="https://azure.microsoft.com/en-us/products/ai-services/openai-service">Azure OpenAI Service</a> and <a href="https://azure.microsoft.com/en-us/products/ai-services/ai-document-intelligence">Azure Document Intelligence</a></p>
+</footer>
+
+</body>
+</html>

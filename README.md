@@ -208,6 +208,7 @@ make test-e2e
 
 | Resource | Purpose | SKU |
 |----------|---------|-----|
+| **App Service** | Streamlit HITL UI 호스팅 | B2 (Linux, Python 3.12) |
 | **Cosmos DB** (Serverless) | 파이프라인 실행 상태, 단계별 상태, 파일 캐시 메타데이터 | Serverless |
 | **Blob Storage** | 중간 결과물 (이미지, JSON) 영구 저장 | Standard LRS |
 | **Service Bus** | 비동기 작업 큐, 실시간 진행 상태 이벤트 | Standard |
@@ -225,21 +226,61 @@ az login
 ./infra/deploy.sh prod koreacentral
 ```
 
-배포 후 `.env.dev.azure` 파일이 자동 생성됩니다. 해당 값을 `.env` 파일에 복사하세요.
+`deploy.sh`는 다음을 자동으로 수행합니다:
+1. 리소스 그룹 생성 (`rg-sldbom-{env}`)
+2. Bicep 템플릿으로 인프라 배포 (Cosmos DB, Storage, Service Bus, App Service)
+3. App Service Managed Identity에 RBAC 역할 할당
+4. 애플리케이션 코드를 App Service에 zip 배포 (`--clean` 모드)
+5. `.env.cloud` 파일 자동 생성
+
+배포 완료 후 App Service URL (`https://app-sldbom-{env}.azurewebsites.net`)에서 데모에 접속할 수 있습니다.
+
+### App Service Deployment Details
+
+| Item | Value |
+|------|-------|
+| **Runtime** | Python 3.12 (Linux) |
+| **Startup** | `startup.sh` — 영구 venv 생성, pip install, Streamlit 실행 |
+| **Build** | Oryx 비활성화 (`SCM_DO_BUILD_DURING_DEPLOYMENT=false`), startup.sh가 직접 관리 |
+| **Port** | 8000 (Streamlit) |
+| **Auth** | Managed Identity (DefaultAzureCredential) |
+| **Venv Cache** | `/home/site/venv` — 컨테이너 재시작 시에도 유지됨 |
+
+> **참고**: 첫 배포 시 pip install로 인해 컨테이너 시작에 ~5-10분 소요됩니다. 이후 재시작은 캐시된 venv를 사용하여 ~30초 이내입니다.
+
+### Manual Code Redeploy (without infra changes)
+
+인프라 변경 없이 코드만 재배포할 때:
+
+```bash
+cd electrical-sld-bom-extraction
+
+# 1. Create deployment zip
+zip -r /tmp/deploy.zip src/ data/ startup.sh requirements.txt pyproject.toml \
+  -x "*.pyc" "*__pycache__*" "data/h_test.pdf" "data/test.pdf"
+
+# 2. Deploy (--clean removes old files)
+az webapp deploy \
+  --resource-group rg-sldbom-dev \
+  --name app-sldbom-dev \
+  --src-path /tmp/deploy.zip \
+  --type zip --clean true
+```
 
 ### Infrastructure Files
 
 ```
 infra/
-├── main.bicep              # 메인 템플릿 (3개 모듈 오케스트레이션)
+├── main.bicep              # 메인 템플릿 (4개 모듈 오케스트레이션)
 ├── modules/
+│   ├── appservice.bicep     # App Service + App Service Plan
 │   ├── cosmosdb.bicep       # Cosmos DB Serverless + 3 containers
 │   ├── storage.bicep        # Blob Storage + lifecycle policy
 │   └── servicebus.bicep     # Service Bus + queue + topic
 ├── parameters/
 │   ├── dev.bicepparam       # 개발 환경 파라미터
 │   └── prod.bicepparam      # 운영 환경 파라미터
-├── deploy.sh                # 배포 스크립트
+├── deploy.sh                # 배포 스크립트 (Bicep + RBAC + zip deploy)
 └── teardown.sh              # 인프라 삭제 스크립트
 ```
 

@@ -137,12 +137,14 @@ pushd "${SCRIPT_DIR}/.." > /dev/null
 # Create deployment zip (exclude unnecessary files)
 zip -r "$APP_ZIP" \
   src/ \
+  data/ \
   startup.sh \
-  requirements.lock.txt \
+  requirements.txt \
   pyproject.toml \
   setup.py 2>/dev/null \
-  -x "*.pyc" "*__pycache__*" "*.env*" "data/*" "outputs/*" "checkpoints/*" \
+  -x "*.pyc" "*__pycache__*" "*.env*" "outputs/*" "checkpoints/*" \
      "tests/*" "docs/*" "blogs/*" "infra/*" ".git/*" "venv/*" \
+     "data/h_test.pdf" "data/test.pdf" \
   > /dev/null
 
 popd > /dev/null
@@ -152,6 +154,7 @@ az webapp deploy \
   --name "$APP_SERVICE_NAME" \
   --src-path "$APP_ZIP" \
   --type zip \
+  --clean true \
   --output none
 
 rm -f "$APP_ZIP"
