@@ -163,30 +163,15 @@ electrical-sld-bom-extraction/
     └── e2e_full_test.py    # Full scenario E2E test
 ```
 
-## Make Commands
-
-| Command | Description |
-|---------|-------------|
-| `make setup` | Full environment setup (venv + deps + .env) |
-| `make run` | Start Streamlit UI (port 8501) |
-| `make run-bg` | Start in tmux (disconnect-safe) |
-| `make run-api` | Start FastAPI server (port 8000) |
-| `make test` | Run pytest |
-| `make test-e2e` | Run Playwright E2E test |
-| `make venv-fix` | Recreate venv (fixes broken shebang) |
-| `make freeze` | Update requirements.lock.txt |
-| `make status` | Check server/tmux/venv status |
-| `make clean` | Remove outputs and caches |
-
 ## Testing
 
 ```bash
 # Unit tests
-make test
+pytest tests/ -v -s
 
 # E2E test (requires running Streamlit server + Playwright)
 pip install playwright && playwright install chromium
-make test-e2e
+python tests/e2e_demo_test.py
 ```
 
 ## API Endpoints
