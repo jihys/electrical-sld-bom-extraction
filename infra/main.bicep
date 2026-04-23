@@ -21,6 +21,21 @@ param tags object = {
   environment: environment
 }
 
+@description('App Service SKU')
+param appServiceSku string = 'B2'
+
+@description('Azure OpenAI endpoint (passed to App Service)')
+param azureOpenAiEndpoint string = ''
+
+@description('Azure OpenAI deployment name')
+param azureOpenAiDeployment string = 'gpt-5.4'
+
+@description('Azure OpenAI API version')
+param azureOpenAiApiVersion string = '2025-03-01-preview'
+
+@description('Azure Document Intelligence endpoint')
+param azureDiEndpoint string = ''
+
 // ── Cosmos DB ─────────────────────────────────────────────────────
 module cosmosDb 'modules/cosmosdb.bicep' = {
   name: 'cosmosdb-${baseName}'
@@ -51,6 +66,26 @@ module serviceBus 'modules/servicebus.bicep' = {
   }
 }
 
+// ── App Service (Streamlit UI) ────────────────────────────────────
+module appService 'modules/appservice.bicep' = {
+  name: 'appservice-${baseName}'
+  params: {
+    appName: 'app-${baseName}-${environment}'
+    location: location
+    tags: tags
+    skuName: appServiceSku
+    cosmosEndpoint: cosmosDb.outputs.endpoint
+    cosmosDatabase: cosmosDb.outputs.databaseName
+    storageBlobEndpoint: storage.outputs.blobEndpoint
+    storageAccountName: storage.outputs.storageAccountName
+    serviceBusEndpoint: serviceBus.outputs.endpoint
+    azureOpenAiEndpoint: azureOpenAiEndpoint
+    azureOpenAiDeployment: azureOpenAiDeployment
+    azureOpenAiApiVersion: azureOpenAiApiVersion
+    azureDiEndpoint: azureDiEndpoint
+  }
+}
+
 // ── Outputs ───────────────────────────────────────────────────────
 output cosmosDbEndpoint string = cosmosDb.outputs.endpoint
 output cosmosDbAccountName string = cosmosDb.outputs.accountName
@@ -65,3 +100,7 @@ output serviceBusNamespace string = serviceBus.outputs.namespaceName
 output serviceBusEndpoint string = serviceBus.outputs.endpoint
 output pipelineTasksQueue string = serviceBus.outputs.pipelineTasksQueue
 output pipelineEventsTopic string = serviceBus.outputs.pipelineEventsTopic
+
+output appServiceName string = appService.outputs.appServiceName
+output appServiceUrl string = appService.outputs.appServiceUrl
+output appServicePrincipalId string = appService.outputs.principalId

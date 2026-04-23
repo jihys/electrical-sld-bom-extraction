@@ -84,6 +84,78 @@ STORAGE_ACCOUNT=$(echo "$OUTPUTS" | python3 -c "import sys,json; print(json.load
 STORAGE_BLOB_EP=$(echo "$OUTPUTS" | python3 -c "import sys,json; print(json.load(sys.stdin)['storageBlobEndpoint']['value'])")
 SB_NAMESPACE=$(echo "$OUTPUTS" | python3 -c "import sys,json; print(json.load(sys.stdin)['serviceBusNamespace']['value'])")
 SB_ENDPOINT=$(echo "$OUTPUTS" | python3 -c "import sys,json; print(json.load(sys.stdin)['serviceBusEndpoint']['value'])")
+APP_SERVICE_NAME=$(echo "$OUTPUTS" | python3 -c "import sys,json; print(json.load(sys.stdin)['appServiceName']['value'])")
+APP_SERVICE_URL=$(echo "$OUTPUTS" | python3 -c "import sys,json; print(json.load(sys.stdin)['appServiceUrl']['value'])")
+APP_PRINCIPAL_ID=$(echo "$OUTPUTS" | python3 -c "import sys,json; print(json.load(sys.stdin)['appServicePrincipalId']['value'])")
+
+# ── Generate .env.cloud (cloud storage mode) ─────────────────────
+
+# ── RBAC: Assign roles to App Service managed identity ────────────
+echo "── Assigning RBAC roles to App Service managed identity..."
+SUBSCRIPTION_ID=$(az account show --query id -o tsv)
+
+# Cosmos DB Data Contributor
+az cosmosdb sql role assignment create \
+  --resource-group "$RESOURCE_GROUP" \
+  --account-name "$COSMOS_ACCOUNT" \
+  --role-definition-name "Cosmos DB Built-in Data Contributor" \
+  --scope "/" \
+  --principal-id "$APP_PRINCIPAL_ID" \
+  --output none 2>/dev/null || echo "   Cosmos DB role already assigned or skipped"
+
+# Storage Blob Data Contributor
+az role assignment create \
+  --assignee-object-id "$APP_PRINCIPAL_ID" \
+  --assignee-principal-type ServicePrincipal \
+  --role "Storage Blob Data Contributor" \
+  --scope "/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${RESOURCE_GROUP}/providers/Microsoft.Storage/storageAccounts/${STORAGE_ACCOUNT}" \
+  --output none 2>/dev/null || echo "   Storage role already assigned or skipped"
+
+# Service Bus Data Sender
+az role assignment create \
+  --assignee-object-id "$APP_PRINCIPAL_ID" \
+  --assignee-principal-type ServicePrincipal \
+  --role "Azure Service Bus Data Sender" \
+  --scope "/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${RESOURCE_GROUP}/providers/Microsoft.ServiceBus/namespaces/${SB_NAMESPACE}" \
+  --output none 2>/dev/null || echo "   Service Bus role already assigned or skipped"
+
+# Cognitive Services User (for OpenAI & Document Intelligence)
+az role assignment create \
+  --assignee-object-id "$APP_PRINCIPAL_ID" \
+  --assignee-principal-type ServicePrincipal \
+  --role "Cognitive Services User" \
+  --scope "/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${RESOURCE_GROUP}" \
+  --output none 2>/dev/null || echo "   Cognitive Services role already assigned or skipped"
+
+echo "   RBAC assignments complete ✓"
+
+# ── Deploy code to App Service (zip deploy) ───────────────────────
+echo "── Deploying application code to App Service..."
+APP_ZIP="/tmp/sldbom-deploy-${ENV}.zip"
+pushd "${SCRIPT_DIR}/.." > /dev/null
+
+# Create deployment zip (exclude unnecessary files)
+zip -r "$APP_ZIP" \
+  src/ \
+  startup.sh \
+  requirements.lock.txt \
+  pyproject.toml \
+  setup.py 2>/dev/null \
+  -x "*.pyc" "*__pycache__*" "*.env*" "data/*" "outputs/*" "checkpoints/*" \
+     "tests/*" "docs/*" "blogs/*" "infra/*" ".git/*" "venv/*" \
+  > /dev/null
+
+popd > /dev/null
+
+az webapp deploy \
+  --resource-group "$RESOURCE_GROUP" \
+  --name "$APP_SERVICE_NAME" \
+  --src-path "$APP_ZIP" \
+  --type zip \
+  --output none
+
+rm -f "$APP_ZIP"
+echo "   Code deployed to ${APP_SERVICE_URL} ✓"
 
 # ── Generate .env.cloud (cloud storage mode) ─────────────────────
 CLOUD_ENV_FILE="${SCRIPT_DIR}/../.env.cloud"
@@ -153,6 +225,9 @@ AZURE_STORAGE_CACHE_CONTAINER=file-cache
 AZURE_SERVICEBUS_NAMESPACE=${SB_ENDPOINT}
 AZURE_SERVICEBUS_TASKS_QUEUE=pipeline-tasks
 AZURE_SERVICEBUS_EVENTS_TOPIC=pipeline-events
+
+# ── App Service (Streamlit UI) ───────────────────────────────────
+APP_SERVICE_URL=${APP_SERVICE_URL}
 EOF
 
 # Also write legacy .env.{env}.azure for backward compat
@@ -164,10 +239,14 @@ echo ""
 echo "   Cosmos DB:     ${COSMOS_ENDPOINT}"
 echo "   Storage:       ${STORAGE_BLOB_EP}"
 echo "   Service Bus:   ${SB_ENDPOINT}"
+echo "   App Service:   ${APP_SERVICE_URL}"
 echo ""
 echo "   Generated files:"
 echo "     .env.cloud          ← Cloud mode (complete, ready to use)"
 echo "     .env.${ENV}.azure   ← Legacy format (backward compat)"
+echo ""
+echo "── Streamlit UI:"
+echo "   ${APP_SERVICE_URL}"
 echo ""
 echo "── 사용법 (How to activate):"
 echo ""
