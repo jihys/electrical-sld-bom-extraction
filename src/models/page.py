@@ -19,6 +19,7 @@ class PageInfo(BaseModel):
     page_num: int
     png_path: str  # absolute path as string for serialization
     svg_path: Optional[str] = None
+    pdf_page_path: Optional[str] = None  # single-page PDF for DI vector input
     dpi: int = 300
     width: int = 0
     height: int = 0

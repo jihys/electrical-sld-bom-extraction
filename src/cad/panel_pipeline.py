@@ -183,6 +183,7 @@ def process_one_panel(
                 client, deployment, locate_prompt,
                 [*guide_images, retry_locate_img],
                 label=f'locate {panel_name}' if attempt == 1 else f'relocate {panel_name} (attempt {attempt})',
+                reasoning_effort='high',
             )
             loc = parse_json(loc_raw)
             if not loc or not loc.get('found', False):
@@ -487,6 +488,7 @@ def process_all_panels_batch(
         client, deployment, locate_prompt,
         [*guide_images, locate_img],
         label=f'locate ALL {len(panels_with_bbox)} panels (crop{crop_idx})',
+        reasoning_effort='high',
     )
     loc = parse_json(loc_raw)
 

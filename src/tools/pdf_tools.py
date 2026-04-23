@@ -88,7 +88,7 @@ def compute_dpi_for_pdf(
             if img_dpi:
                 per_page[page_idx] = _round_dpi(img_dpi)
             elif len(page.get_drawings()) > 30000:
-                per_page[page_idx] = max_dpi
+                per_page[page_idx] = 12 * 72  # 864 DPI for high-complexity vector pages
             else:
                 per_page[page_idx] = no_text_dpi
 
@@ -116,6 +116,9 @@ def split_pdf_to_pages(
     doc = fitz.open(str(pdf_path))
     pages: List[PageInfo] = []
 
+    # Disable anti-aliasing for sharper lines in CAD/engineering drawings
+    fitz.TOOLS.set_aa_level(0)
+
     for page_idx, page in enumerate(doc, start=1):
         page_dpi = (per_page_dpi or {}).get(page_idx, dpi)
         zoom = page_dpi / 72.0
@@ -129,14 +132,24 @@ def split_pdf_to_pages(
         svg_path = out / f"page{page_idx}.svg"
         svg_path.write_text(svg_text, encoding="utf-8")
 
+        # Extract single-page PDF for DI (preserves vector line data)
+        single_pdf_path = out / f"page{page_idx}.pdf"
+        single_doc = fitz.open()
+        single_doc.insert_pdf(doc, from_page=page_idx - 1, to_page=page_idx - 1)
+        single_doc.save(str(single_pdf_path))
+        single_doc.close()
+
         pages.append(PageInfo(
             page_num=page_idx,
             png_path=str(png_path),
             svg_path=str(svg_path),
+            pdf_page_path=str(single_pdf_path),
             dpi=page_dpi,
             width=pix.width,
             height=pix.height,
         ))
 
+    # Restore default anti-aliasing level
+    fitz.TOOLS.set_aa_level(8)
     doc.close()
     return pages

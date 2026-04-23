@@ -286,10 +286,10 @@ class StreamlitE2ERunner:
     # ── Step 4: Panel Areas + Bay ─────────────────────────────────
 
     def step4_panel_areas(self):
-        print(f"\n{'='*60}\nSTEP 4: Panel Areas + Bay (LLM)\n{'='*60}")
+        print(f"\n{'='*60}\nSTEP 4: Panel Areas + Bay\n{'='*60}")
 
         self._ss("04_before")
-        self._click_button(r"Run Step 4.*Panel Areas.*Bay", label="Run Step 4")
+        self._click_button(r"Run Step 4", label="Run Step 4")
         self._wait_llm_done("Panel Area Detection")
         self._ss("04_detected")
 
@@ -320,10 +320,88 @@ class StreamlitE2ERunner:
         self._wait_llm_done("BOM Extraction")
         self._ss("05_extracted")
 
-        # HITL: Confirm BOM
-        self._click_button(
-            r"Confirm BOM.*Done", timeout_s=30, label="Confirm BOM"
-        )
+        # Collapse all expanders first to make page shorter, then find button
+        try:
+            self.page.evaluate("""
+                // Collapse all open expanders to shorten page
+                document.querySelectorAll('[data-testid="stExpander"] details[open]').forEach(d => {
+                    d.removeAttribute('open');
+                });
+                // Also try clicking summary elements
+                document.querySelectorAll('[data-testid="stExpander"] details[open] > summary').forEach(s => {
+                    s.click();
+                });
+            """)
+            time.sleep(1)
+        except Exception:
+            pass
+
+        # Scroll to bottom aggressively
+        for _ in range(5):
+            self.page.evaluate("""
+                window.scrollTo(0, document.body.scrollHeight);
+                const containers = document.querySelectorAll(
+                    '[data-testid="stAppViewContainer"], [data-testid="stMainBlockContainer"], .main'
+                );
+                containers.forEach(c => c.scrollTo && c.scrollTo(0, c.scrollHeight));
+                // Scroll all parent containers
+                let el = document.querySelector('button');
+                if (el) {
+                    let p = el.parentElement;
+                    while (p) {
+                        if (p.scrollHeight > p.clientHeight) p.scrollTop = p.scrollHeight;
+                        p = p.parentElement;
+                    }
+                }
+            """)
+            time.sleep(0.5)
+
+        # HITL: Confirm BOM — the button is at the bottom of a long page
+        # with 12+ BOM expanders. Use JavaScript to find and click it.
+        confirm_found = False
+
+        # First collapse all expanders to shorten the page
+        try:
+            self.page.evaluate("""
+                document.querySelectorAll('[data-testid="stExpander"] details[open]').forEach(d => {
+                    d.removeAttribute('open');
+                });
+            """)
+            time.sleep(1)
+        except Exception:
+            pass
+
+        # Try to find and click via JavaScript (most reliable for off-screen buttons)
+        for attempt in range(8):
+            try:
+                clicked = self.page.evaluate("""
+                    () => {
+                        const buttons = Array.from(document.querySelectorAll('button'));
+                        const btn = buttons.find(b => b.textContent.includes('Confirm BOM'));
+                        if (btn) {
+                            btn.scrollIntoView({block: 'center'});
+                            btn.click();
+                            return true;
+                        }
+                        return false;
+                    }
+                """)
+                if clicked:
+                    print(f"  🖱️ Clicked: Confirm BOM (JS, attempt {attempt+1})")
+                    confirm_found = True
+                    time.sleep(1)
+                    break
+            except Exception:
+                pass
+
+            # Try scrolling with keyboard End key
+            self.page.keyboard.press("End")
+            time.sleep(1.5)
+
+        if not confirm_found:
+            self._click_button(
+                r"Confirm BOM", timeout_s=30, label="Confirm BOM"
+            )
         self._wait_streamlit_ready()
         self._ss("05_confirmed")
 

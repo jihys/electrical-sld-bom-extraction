@@ -27,6 +27,25 @@ class Settings(BaseSettings):
     max_detection_iterations: int = 3
     max_workflow_iterations: int = 50
 
+    # ── Azure Cosmos DB (persistent state) ────────────────────────────────
+    azure_cosmos_endpoint: str = ""
+    azure_cosmos_database: str = "sld-bom"
+    azure_cosmos_key: Optional[str] = None  # empty → DefaultAzureCredential
+
+    # ── Azure Blob Storage (artifacts) ────────────────────────────────────
+    azure_storage_account: str = ""
+    azure_storage_blob_endpoint: str = ""
+    azure_storage_artifacts_container: str = "pipeline-artifacts"
+    azure_storage_cache_container: str = "file-cache"
+
+    # ── Azure Service Bus (progress events) ───────────────────────────────
+    azure_servicebus_namespace: str = ""
+    azure_servicebus_tasks_queue: str = "pipeline-tasks"
+    azure_servicebus_events_topic: str = "pipeline-events"
+
+    # ── Feature flags ─────────────────────────────────────────────────────
+    enable_persistent_state: bool = False  # set True to enable Cosmos/Blob persistence
+
     # ── Paths ─────────────────────────────────────────────────────────────
     checkpoint_dir: str = "./checkpoints"
     output_dir: str = "./outputs"
@@ -44,3 +63,11 @@ class Settings(BaseSettings):
         p = Path(self.output_dir)
         p.mkdir(parents=True, exist_ok=True)
         return p
+
+    @property
+    def has_cosmos(self) -> bool:
+        return bool(self.azure_cosmos_endpoint) and self.enable_persistent_state
+
+    @property
+    def has_blob_storage(self) -> bool:
+        return bool(self.azure_storage_blob_endpoint) and self.enable_persistent_state

@@ -38,3 +38,12 @@ data/h_test.pdf
 
 # Lock file (users regenerate via pip freeze)
 # requirements.lock.txt is kept for reproducibility
+
+# Environment files (contain secrets)
+.env
+.env.local
+.env.cloud
+.env.*.azure
+# Allow example templates (no secrets)
+!.env.local.example
+!.env.cloud.example

@@ -604,8 +604,13 @@ class FullE2ERunner:
                             # After st.rerun(), scroll to make the added name visible
                             self._scroll_down()
                             time.sleep(1)
-                            # Check: either the text appears or we have more expanders
+                            # Check: text in page, input value, or more expanders
                             name_found = self._wait_text("TEST_PANEL_ADDED", 10)
+                            if not name_found:
+                                # st.text_input values live in <input value="...">
+                                name_found = self.page.locator(
+                                    'input[value="TEST_PANEL_ADDED"]'
+                                ).count() > 0
                             if not name_found:
                                 exp_after = self.page.locator('[data-testid="stExpander"]').count()
                                 name_found = exp_after > exp_before

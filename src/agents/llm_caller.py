@@ -49,7 +49,7 @@ def call_llm(
     content: List[Dict[str, Any]] = [{"type": "input_text", "text": prompt}]
     for img_path in (image_paths or []):
         url = image_to_data_url(img_path)
-        content.append({"type": "input_image", "image_url": url, "detail": "original"})
+        content.append({"type": "input_image", "image_url": url, "detail": "high"})
 
     t0 = time.time()
     tag = f" [{label}]" if label else ""

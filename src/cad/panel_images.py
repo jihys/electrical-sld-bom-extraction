@@ -26,7 +26,8 @@ def draw_target_bbox(img_bgr: np.ndarray, bbox: List[int], color=(255, 0, 0), la
     bbox_w = max(x2 - x1, 1)
     # Target: rendered text height ≈ 80% of bbox height
     # cv2 FONT_HERSHEY_SIMPLEX at scale=1.0 produces ~22px tall glyphs
-    font_scale = max(0.5, (bbox_h * 0.8) / 22.0)
+    # Cap at 2.5 so large panel bboxes don't produce enormous text
+    font_scale = min(2.5, max(0.5, (bbox_h * 0.8) / 22.0))
     # Cap so the label width doesn't exceed 2x bbox width
     thickness = max(1, int(font_scale * 1.5))
     (tw, th), _ = cv2.getTextSize(display, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness)

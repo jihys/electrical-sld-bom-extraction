@@ -42,9 +42,11 @@ from .image_utils import (
     hex_to_bgr,
 )
 from .llm_client import (
+    BATCH_VERIFICATION_SCHEMA,
     DIRECTIONAL_VERIFICATION_SCHEMA,
     _build_detection_prompt,
     _build_verification_prompt_v4,
+    build_batch_verification_prompt,
     check_di_crop,
     responses_call,
     responses_call_with_image,
@@ -105,20 +107,65 @@ def _filter_new_polygons(
         x1, y1, x2, y2 = bbox
         rect = [float(x1), float(y1), float(x2), float(y1),
                 float(x2), float(y2), float(x1), float(y2)]
-        if any(_intersection_area(existing, bbox) > 0 for existing in existing_bboxes):
-            continue
-        if any(_contains_bbox(existing, bbox) for existing in existing_bboxes):
-            continue
-        candidates.append((rect, bbox, _bbox_area(bbox)))
+        new_area = _bbox_area(bbox)
+        # Drop if >50% of new region overlaps with ANY SINGLE existing crop
+        # OR if combined overlap with ALL existing crops covers >60% of new region
+        if new_area > 0:
+            total_overlap = 0
+            drop = False
+            for existing in existing_bboxes:
+                inter = _intersection_area(existing, bbox)
+                if inter / new_area > 0.5:
+                    drop = True
+                    break
+                total_overlap += inter
+            if not drop and total_overlap / new_area > 0.6:
+                drop = True
+            if drop:
+                continue
+        candidates.append((rect, bbox, new_area))
 
     candidates.sort(key=lambda item: item[2], reverse=True)
     kept: List[List[float]] = []
     kept_bboxes: List[Tuple[int, int, int, int]] = []
-    for polygon, bbox, _ in candidates:
-        if any(_intersection_area(kb, bbox) > 0 for kb in kept_bboxes):
+    for polygon, bbox, area in candidates:
+        # Among new candidates, drop if >50% overlapping with already-kept
+        if area > 0 and any(
+            _intersection_area(kb, bbox) / area > 0.5
+            for kb in kept_bboxes
+        ):
             continue
         kept.append(polygon)
         kept_bboxes.append(bbox)
+
+    # Final containment sweep: drop any kept polygon >=85% inside another kept polygon
+    changed = True
+    while changed:
+        changed = False
+        i = 0
+        while i < len(kept):
+            bbox_i = kept_bboxes[i]
+            area_i = _bbox_area(bbox_i)
+            if area_i <= 0:
+                i += 1
+                continue
+            drop = False
+            for j in range(len(kept)):
+                if i == j:
+                    continue
+                area_j = _bbox_area(kept_bboxes[j])
+                inter = _intersection_area(bbox_i, kept_bboxes[j])
+                # Drop the smaller one if >=85% contained in the larger one
+                if area_i <= area_j and inter / area_i >= 0.85:
+                    drop = True
+                    break
+            if drop:
+                kept.pop(i)
+                kept_bboxes.pop(i)
+                changed = True
+            else:
+                i += 1
+
     return kept
 
 
@@ -853,6 +900,232 @@ def verify_and_refine_new_crops(
     return verified_crops, stats
 
 
+# ── Batch verification (single LLM call for all new crops) ─────────────────────
+
+def batch_verify_crops(
+    client: AzureOpenAI,
+    deployment: str,
+    output_root: Path,
+    crops_root: Path,
+    crops_temp_root: Path,
+    page_num: int,
+    new_crops: List[ImageCropInfo],
+    existing_crops: List[ImageCropInfo],
+    verification_reasoning_effort: Optional[str] = None,
+    grid_step_x: int = GRID_STEP_X,
+    grid_step_y: int = GRID_STEP_Y,
+) -> Tuple[List[ImageCropInfo], Dict]:
+    """Verify ALL new crops in a single LLM call (batch).
+
+    Colours: 🟠 orange = existing confirmed, 🟣 purple = new candidates.
+    Returns (verified_crops, stats) with same interface as verify_and_refine_new_crops.
+    """
+    import time as _time
+
+    if not new_crops:
+        return [], {"iterations_per_crop": [], "total_iterations": 0, "llm_calls": []}
+
+    base_image = cv2.imread(str(_page_image_path(output_root, page_num)))
+    h_img, w_img = base_image.shape[:2]
+    image_size = (w_img, h_img)
+
+    # Build overlay: grid + orange existing + purple candidates with labels
+    overlay = draw_grid_with_cell_numbers(
+        base_image, step_x=grid_step_x, step_y=grid_step_y
+    )
+    for crop in existing_crops:
+        if crop.polygon:
+            draw_polygon(overlay, crop.polygon, hex_to_bgr("#f97316"), 10)
+    for crop in new_crops:
+        if crop.polygon:
+            draw_polygon(overlay, crop.polygon, hex_to_bgr("#9333ea"), 10)
+            xs = [int(crop.polygon[i]) for i in range(0, len(crop.polygon), 2)]
+            ys = [int(crop.polygon[i]) for i in range(1, len(crop.polygon), 2)]
+            cv2.putText(
+                overlay, str(crop.index),
+                (min(xs) + 10, min(ys) + 40),
+                cv2.FONT_HERSHEY_SIMPLEX, 1.5,
+                hex_to_bgr("#9333ea"), 4, cv2.LINE_AA,
+            )
+
+    # Save debug overlay
+    debug_path = crops_temp_root / f"page{page_num}" / "batch_verify_overlay.png"
+    debug_path.parent.mkdir(parents=True, exist_ok=True)
+    cv2.imwrite(str(debug_path), overlay, [cv2.IMWRITE_PNG_COMPRESSION, 1])
+
+    existing_boxes = [
+        {"index": c.index, "polygon": c.polygon} for c in existing_crops if c.polygon
+    ]
+    candidate_boxes = [
+        {"index": c.index, "polygon": c.polygon} for c in new_crops if c.polygon
+    ]
+    prompt = build_batch_verification_prompt(
+        existing_boxes, candidate_boxes, image_size,
+        grid_step_x=grid_step_x, grid_step_y=grid_step_y,
+    )
+
+    # Images: overlay + individual crop images
+    images_to_send = [overlay]
+    for crop in new_crops:
+        if crop.polygon:
+            ci = crop_polygon(base_image, crop.polygon)
+            if ci is not None:
+                images_to_send.append(ci)
+
+    n = len(new_crops)
+    print(f"  [batch_verify] {n} candidates in 1 LLM call "
+          f"({len(images_to_send)} images, effort={verification_reasoning_effort})...")
+
+    t0 = _time.time()
+    text, _ = responses_call_with_image(
+        client, deployment, prompt, images_to_send,
+        reasoning_effort=verification_reasoning_effort,
+    )
+    elapsed = _time.time() - t0
+    print(f"  [batch_verify] LLM responded in {elapsed:.1f}s")
+
+    result = safe_parse_json(text)
+    crop_results = result.get("crops", [])
+
+    # Build white-filled base for saving crops
+    save_base = base_image.copy()
+    for crop in existing_crops:
+        if crop.polygon:
+            cxs = [int(crop.polygon[j]) for j in range(0, len(crop.polygon), 2)]
+            cys = [int(crop.polygon[j]) for j in range(1, len(crop.polygon), 2)]
+            save_base[max(0, min(cys)):min(h_img, max(cys)),
+                      max(0, min(cxs)):min(w_img, max(cxs))] = 255
+
+    # Process results
+    verified: List[ImageCropInfo] = []
+    crop_map = {c.index: c for c in new_crops}
+    llm_calls = [{
+        "task": "batch_verification",
+        "n_candidates": n,
+        "reasoning_effort": verification_reasoning_effort,
+        "time_s": round(elapsed, 3),
+    }]
+
+    for cr in crop_results:
+        idx = cr.get("index")
+        is_electrical = cr.get("is_electrical", False)
+        issue = cr.get("issue", "")
+        crop = crop_map.get(idx)
+        if not crop:
+            print(f"    ⚠️ Unknown crop index {idx}, skipping")
+            continue
+
+        if not is_electrical:
+            print(f"    ✗ Crop {idx}: NOT electrical — {issue}")
+            continue
+
+        ea = {k: cr.get(k, {}) for k in ["x1", "y1", "x2", "y2"]}
+        all_none = all(ea[k].get("direction", "") == "none" for k in ["x1", "y1", "x2", "y2"])
+
+        if not all_none:
+            polygon = crop.polygon
+            xs_cur = [polygon[i] for i in range(0, len(polygon), 2)]
+            ys_cur = [polygon[i] for i in range(1, len(polygon), 2)]
+            x1_c = max(0, min(int(ea["x1"].get("corrected", min(xs_cur))), w_img - 1))
+            y1_c = max(0, min(int(ea["y1"].get("corrected", min(ys_cur))), h_img - 1))
+            x2_c = max(0, min(int(ea["x2"].get("corrected", max(xs_cur))), w_img))
+            y2_c = max(0, min(int(ea["y2"].get("corrected", max(ys_cur))), h_img))
+            if x1_c >= x2_c or y1_c >= y2_c:
+                print(f"    ✗ Crop {idx}: invalid corrected edges, dropping")
+                continue
+            crop.polygon = [
+                float(x1_c), float(y1_c), float(x2_c), float(y1_c),
+                float(x2_c), float(y2_c), float(x1_c), float(y2_c),
+            ]
+            crop.bbox = polygon_to_bbox(crop.polygon, image_size, 0)
+            dir_summary = " | ".join(
+                f"{k}: {ea[k].get('direction', '?')} → {ea[k].get('corrected', '?')}"
+                for k in ["x1", "y1", "x2", "y2"]
+            )
+            print(f"    ✓ Crop {idx}: edges corrected → [{x1_c},{y1_c},{x2_c},{y2_c}]")
+        else:
+            print(f"    ✓ Crop {idx}: valid, edges correct")
+
+        # Save crop image + coords in temp
+        cropped = crop_polygon(save_base, crop.polygon)
+        if cropped is not None:
+            temp_img = _output_crop_image_path(crops_temp_root, page_num, crop.index)
+            temp_img.parent.mkdir(parents=True, exist_ok=True)
+            cv2.imwrite(str(temp_img), cropped, [cv2.IMWRITE_PNG_COMPRESSION, 1])
+            temp_coords = _output_crop_txt_path(crops_temp_root, page_num, crop.index)
+            write_polygon_txt(temp_coords, crop.polygon)
+            crop.image_path = temp_img
+            crop.coords_path = temp_coords
+
+        verified.append(crop)
+        existing_crops.append(crop)
+
+    # Drop verified crops that are fully contained in an existing (DI) crop
+    # or that overlap >70% with an existing crop
+    existing_bboxes = [
+        (c.index, polygon_to_bbox(c.polygon, image_size, 0))
+        for c in existing_crops if c.polygon and c not in verified
+    ]
+    before_n = len(verified)
+    kept = []
+    for vc in verified:
+        vc_bbox = polygon_to_bbox(vc.polygon, image_size, 0)
+        if not vc_bbox:
+            kept.append(vc)
+            continue
+        vc_area = _bbox_area(vc_bbox)
+        drop = False
+        for ei, eb in existing_bboxes:
+            if not eb:
+                continue
+            inter = _intersection_area(vc_bbox, eb)
+            # Fully contained or >70% overlap with existing
+            if vc_area > 0 and inter / vc_area > 0.7:
+                print(f"    ✗ Crop {vc.index}: {inter/vc_area:.0%} overlap with existing crop {ei} — dropping")
+                drop = True
+                break
+        if not drop:
+            kept.append(vc)
+
+    # Also drop verified crops that are fully contained within another verified crop
+    final = []
+    for i, vc in enumerate(kept):
+        vc_bbox = polygon_to_bbox(vc.polygon, image_size, 0)
+        if not vc_bbox:
+            final.append(vc)
+            continue
+        vc_area = _bbox_area(vc_bbox)
+        contained = False
+        for j, other in enumerate(kept):
+            if i == j:
+                continue
+            ob = polygon_to_bbox(other.polygon, image_size, 0)
+            if not ob:
+                continue
+            inter = _intersection_area(vc_bbox, ob)
+            other_area = _bbox_area(ob)
+            # Drop the smaller one if >70% of it is inside the larger one
+            if vc_area > 0 and vc_area <= other_area and inter / vc_area > 0.7:
+                print(f"    ✗ Crop {vc.index}: sub-region of crop {other.index} — dropping")
+                contained = True
+                break
+        if not contained:
+            final.append(vc)
+
+    verified = final
+    if before_n != len(verified):
+        print(f"  [batch_verify] Overlap filter: {before_n} → {len(verified)} verified")
+
+    print(f"  [batch_verify] Result: {len(verified)} verified, {n - len(verified)} dropped")
+
+    stats = {
+        "iterations_per_crop": [1] * len(verified) + [1] * (n - len(verified)),
+        "total_iterations": n,
+        "llm_calls": llm_calls,
+    }
+    return verified, stats
+
+
 # ── Post-processing: content crop ──────────────────────────────────────────────
 
 def _apply_content_crop_to_page(crops_root: Path, page_num: int) -> List[str]:
@@ -1308,6 +1581,24 @@ def run_page_pipeline(
     fp_raw = result.get("full_page", False)
     full_page = bool(fp_raw)
 
+    # Drop non-electrical existing crops (identified by LLM during detection)
+    dropped_indices: List[int] = []
+    drop_list = result.get("drop_non_electrical", [])
+    if drop_list and crops:
+        drop_index_set = set()
+        for item in drop_list:
+            idx = item.get("index") if isinstance(item, dict) else None
+            reason = item.get("reason", "") if isinstance(item, dict) else ""
+            if idx is not None:
+                drop_index_set.add(idx)
+                print(f"[Page {page_num}] 🗑️ Dropped non-electrical DI crop {idx}: {reason}")
+        if drop_index_set:
+            crops = [c for c in crops if c.index not in drop_index_set]
+            dropped_indices = sorted(drop_index_set)
+            n_existing = len(crops)
+            print(f"[Page {page_num}] Electrical filter: dropped {dropped_indices}, "
+                  f"keeping {n_existing} crops")
+
     # Normalize missing list (each item may be dict with "polygon" or a raw list)
     raw_polys = []
     for item in missing_polygons:
@@ -1339,7 +1630,7 @@ def run_page_pipeline(
         raw_polys = clipped
 
     # Coverage checks: snap to content bbox when appropriate
-    if raw_polys and not crops:
+    if raw_polys and not is_full_image:
         content_area = (cx2 - cx1) * (cy2 - cy1)
         total_new_area = sum(
             _bbox_area(b)
@@ -1348,10 +1639,16 @@ def run_page_pipeline(
         )
         coverage = total_new_area / content_area if content_area > 0 else 1.0
 
-        if coverage > 0.6:
-            # Large detection (>60% of content bbox) → snap to content bbox
+        if not crops and coverage > 0.6:
+            # No existing crops + large detection (>60%) → snap to content bbox
             raw_polys = [content_poly]
-        elif not is_full_image and len(raw_polys) == 1:
+        elif len(raw_polys) >= 4 and coverage > 0.5:
+            # Too many overlapping LLM regions covering >50% of content area
+            # → consolidate to content bbox (hard-to-segment page)
+            print(f"[Page {page_num}] Consolidation: {len(raw_polys)} LLM regions "
+                  f"covering {coverage*100:.0f}% of content area → merging to content bbox")
+            raw_polys = [content_poly]
+        elif not crops and not is_full_image and len(raw_polys) == 1:
             # Single partial detection — expand if it sits inside the content area
             det_bbox = polygon_to_bbox(raw_polys[0], image_size, 0)
             if det_bbox:
@@ -1376,14 +1673,12 @@ def run_page_pipeline(
         output_root, crops_temp_root, page_num, missing_polygons_filtered, start_idx
     )
 
-    # Verify and refine
-    verified_crops, stats = verify_and_refine_new_crops(
+    # Verify and refine (batch: single LLM call for all new crops)
+    verified_crops, stats = batch_verify_crops(
         client, deployment, output_root, crops_root, crops_temp_root,
         page_num, new_crops, crops,
-        max_iterations=max_iterations,
         verification_reasoning_effort=verification_reasoning_effort,
         grid_step_x=grid_step_x, grid_step_y=grid_step_y,
-        use_grid=use_grid,
     )
     n_verified = len([c for c in verified_crops if not c.is_existing])
 
@@ -1435,6 +1730,8 @@ def run_page_pipeline(
         "n_existing": n_existing,
         "n_detected": n_detected,
         "n_verified": n_verified,
+        "n_dropped_non_electrical": len(dropped_indices),
+        "dropped_indices": list(dropped_indices),
         "iterations_per_crop": stats["iterations_per_crop"],
         "total_iterations": stats["total_iterations"],
         "overlay_path": overlay_path,

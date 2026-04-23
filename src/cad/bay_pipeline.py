@@ -76,7 +76,7 @@ def process_one_bay_split(
     print(f'\n  [{panel_name}] bay split attempt — image {w}x{h}px')
 
     overlay = add_grid_overlay(img, grid_size)
-    prompt = build_bay_prompt(panel_name, w, h, grid_size, BAY_SCHEMA)
+    prompt = build_bay_prompt(panel_name, w, h, grid_size, BAY_SCHEMA, num_guides=len(guide_images))
 
     raw = call_llm(
         client, deployment, prompt,

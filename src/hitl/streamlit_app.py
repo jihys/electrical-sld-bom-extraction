@@ -28,6 +28,13 @@ def _safe_print_exc():
     except OSError:
         pass
 
+def _safe_print(*args, **kwargs):
+    """print() wrapper that silently ignores OSError when Streamlit fd is closed."""
+    try:
+        print(*args, **kwargs)
+    except OSError:
+        pass
+
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
@@ -398,6 +405,120 @@ def _active_pages():
     if sel is None or sel=={p["page_num"] for p in pages}: return pages
     return [p for p in pages if p["page_num"] in sel]
 
+# ── Checkpoint helpers ────────────────────────────────────────────
+def _ckpt_dir(settings):
+    """Return checkpoint directory scoped to the current PDF file name."""
+    pdf = _s("pdf_path", "")
+    stem = Path(pdf).stem if pdf else "unknown"
+    d = settings.checkpoint_path / stem
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+def _save_checkpoint(settings, step_name: str, data: dict):
+    """Save step result to a JSON checkpoint file."""
+    p = _ckpt_dir(settings) / f"{step_name}.json"
+    p.write_text(json.dumps(data, ensure_ascii=False, default=str), encoding="utf-8")
+
+def _load_checkpoint(settings, step_name: str):
+    """Load step result from checkpoint. Returns None if not found."""
+    p = _ckpt_dir(settings) / f"{step_name}.json"
+    if p.exists():
+        return json.loads(p.read_text(encoding="utf-8"))
+    return None
+
+def _has_checkpoint(settings, step_name: str) -> bool:
+    return (_ckpt_dir(settings) / f"{step_name}.json").exists()
+
+def _restore_step1(settings) -> bool:
+    """Try to restore Step 1 results from checkpoint. Returns True if restored."""
+    data = _load_checkpoint(settings, "step1")
+    if not data:
+        return False
+    # Verify that page PNG files still exist
+    for p in data.get("pages", []):
+        if not Path(p["png_path"]).exists():
+            return False
+    _ss("pages", data["pages"])
+    _ss("step", max(_s("step", 0), 1))
+    return True
+
+def _restore_step2(settings) -> bool:
+    data = _load_checkpoint(settings, "step2")
+    if not data:
+        return False
+    _ss("di_regions_by_page", data.get("di_regions_by_page", {}))
+    _ss("regions_by_page", data.get("regions_by_page", {}))
+    _ss("di_detection_done", True)
+    _ss("missing_detection_done", True)
+    _ss("regions_confirmed", data.get("regions_confirmed", False))
+    _ss("step", max(_s("step", 0), 2))
+    if data.get("step_timings"):
+        t = _s("step_timings", {}); t.update(data["step_timings"]); _ss("step_timings", t)
+    return True
+
+def _restore_step3(settings) -> bool:
+    data = _load_checkpoint(settings, "step3")
+    if not data:
+        return False
+    _ss("names_by_page", data.get("names_by_page", {}))
+    _ss("matches_by_page", data.get("matches_by_page", {}))
+    _ss("names_confirmed", data.get("names_confirmed", False))
+    _ss("step", max(_s("step", 0), 3))
+    if data.get("step_timings"):
+        t = _s("step_timings", {}); t.update(data["step_timings"]); _ss("step_timings", t)
+    return True
+
+def _restore_step4(settings) -> bool:
+    data = _load_checkpoint(settings, "step4")
+    if not data:
+        return False
+    _ss("panel_crops", data.get("panel_crops", []))
+    _ss("bay_results", data.get("bay_results", []))
+    _ss("crops_confirmed", data.get("crops_confirmed", False))
+    _ss("step", max(_s("step", 0), 4))
+    if data.get("step_timings"):
+        t = _s("step_timings", {}); t.update(data["step_timings"]); _ss("step_timings", t)
+    return True
+
+def _restore_step5(settings) -> bool:
+    data = _load_checkpoint(settings, "step5")
+    if not data:
+        return False
+    _ss("bom_results", data.get("bom_results", {}))
+    _ss("bom_confirmed", data.get("bom_confirmed", False))
+    _ss("step", max(_s("step", 0), 5))
+    if data.get("step_timings"):
+        t = _s("step_timings", {}); t.update(data["step_timings"]); _ss("step_timings", t)
+    return True
+
+def _restore_all_checkpoints(settings):
+    """Restore all available checkpoints in order. Returns highest restored step."""
+    restored = 0
+    if _restore_step1(settings): restored = 1
+    else: return restored
+    if _restore_step2(settings): restored = 2
+    else: return restored
+    if _restore_step3(settings): restored = 3
+    else: return restored
+    if _restore_step4(settings): restored = 4
+    else: return restored
+    if _restore_step5(settings): restored = 5
+    return restored
+# ── End checkpoint helpers ────────────────────────────────────────
+
+# ── Persistent state (Cosmos DB + Blob) ───────────────────────────
+def _persist():
+    """Get the persistence layer (creates on first call). No-op if disabled."""
+    from src.state.persistence import get_persistence
+    return get_persistence(_load_settings())
+
+def _run_id():
+    """Get or create a run_id for the current session."""
+    if "_run_id" not in st.session_state:
+        import uuid
+        st.session_state["_run_id"] = uuid.uuid4().hex[:12]
+    return st.session_state["_run_id"]
+
 @st.cache_resource
 def _load_settings():
     env=_PROJECT_ROOT/".env"
@@ -421,8 +542,6 @@ def _make_thumbnail(png_path, thumb_dir, max_w=300):
     thumb_dir = Path(thumb_dir)
     thumb_dir.mkdir(parents=True, exist_ok=True)
     thumb_path = thumb_dir / (Path(png_path).stem + "_thumb.jpg")
-    if thumb_path.exists():
-        return str(thumb_path)
     img = cv2.imread(str(png_path))
     if img is None:
         return str(png_path)
@@ -434,6 +553,18 @@ def _make_thumbnail(png_path, thumb_dir, max_w=300):
 
 def run_step1(pdf_path, settings):
     from src.tools.pdf_tools import compute_dpi_for_pdf, split_pdf_to_pages
+    # Generate a fresh run_id every time Step 1 starts
+    import uuid
+    st.session_state["_run_id"] = uuid.uuid4().hex[:12]
+    # Clear any stale errors from previous runs
+    _ss("step_errors", {})
+    rid = _run_id()
+    p_layer = _persist()
+    try:
+        p_layer.create_run(rid, pdf_path)
+    except Exception:
+        pass
+    p_layer.start_step(rid, 1, "step1")
     pages=split_pdf_to_pages(pdf_path,str(settings.output_path/"pages"),
         *compute_dpi_for_pdf(pdf_path))
     page_dicts = [p.model_dump() for p in pages]
@@ -441,6 +572,14 @@ def run_step1(pdf_path, settings):
     for p in page_dicts:
         p["thumb_path"] = _make_thumbnail(p["png_path"], thumb_dir)
     _ss("pages", page_dicts); _ss("step",1); _ss("current_view",0)
+    _save_checkpoint(settings, "step1", {"pages": page_dicts})
+    # Persist to Azure
+    p_layer.persist_step(
+        rid, 1, "step1",
+        result_data={"pages": page_dicts},
+        local_artifact_dir=settings.output_path / "pages",
+        pdf_path=pdf_path,
+    )
 
 def render_step1():
     st.markdown('<span class="step-badge">Step 1</span>',unsafe_allow_html=True)
@@ -498,18 +637,18 @@ def run_step2a(settings):
     output_root.mkdir(parents=True, exist_ok=True)
 
     bar = st.progress(0, "Phase A: DI figure detection (parallel) …")
-    status_container = st.container()
-    page_status = {pg.page_num: "⏳ waiting" for pg in pages}
+    status_container = st.empty()
+    page_status = {pg.page_num: "⏳" for pg in pages}
     def _update_status_a():
-        lines = [f"**Page {pn}**: {s}" for pn, s in sorted(page_status.items())]
-        status_container.markdown(" · ".join(lines), unsafe_allow_html=True)
+        parts = [f"P{pn}:{s}" for pn, s in sorted(page_status.items())]
+        status_container.caption(" · ".join(parts))
     _update_status_a()
     t0 = time.time()
 
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     # Prepare per-page directories first (sequential, fast)
-    page_prep = {}  # pn -> (dest_img, page_dir)
+    page_prep = {}  # pn -> (dest_img, page_dir, dest_pdf)
     page_dpi_map = {}
     for pg in pages:
         pn = pg.page_num
@@ -518,23 +657,29 @@ def run_step2a(settings):
         page_dir.mkdir(parents=True, exist_ok=True)
         dest_img = page_dir / f"page{pn}.png"
         shutil.copy2(pg.png_path, dest_img)
-        page_prep[pn] = (dest_img, page_dir)
+        # Copy per-page PDF if available (vector data for DI Pass 1)
+        dest_pdf = None
+        if pg.pdf_page_path and Path(pg.pdf_page_path).exists():
+            dest_pdf = page_dir / f"page{pn}.pdf"
+            shutil.copy2(pg.pdf_page_path, dest_pdf)
+        page_prep[pn] = (dest_img, page_dir, dest_pdf)
 
     # Define per-page DI analysis function
     def _di_analyze_page(pg):
         pn = pg.page_num
-        page_status[pn] = "🔄 analyzing"
-        dest_img, page_dir = page_prep[pn]
+        page_status[pn] = "🔄"
+        dest_img, page_dir, dest_pdf = page_prep[pn]
         summary = PageExtractionSummary(page=pn, page_image=dest_img)
 
-        # Pass 1: full DI analysis
+        # Pass 1: use per-page PDF (preserves vector lines) if available
+        pass1_input = dest_pdf if dest_pdf else dest_img
         result1 = analyze_page_with_document_intelligence(
-            di_client, di_model, dest_img,
+            di_client, di_model, pass1_input,
             extract_tables=False, extract_text=False,
         )
         figures1 = getattr(result1, "figures", []) or []
         pass1_count = len(figures1)
-        print(f"  [DI] page {pn} Pass 1: {pass1_count} figures")
+        _safe_print(f"  [DI] page {pn} Pass 1: {pass1_count} figures")
 
         # Pass 2: whitefill detected figures → re-run DI
         if figures1:
@@ -547,7 +692,7 @@ def run_step2a(settings):
                 extract_tables=False, extract_text=False,
             )
             figures2 = getattr(result2, "figures", []) or []
-            print(f"  [DI] page {pn} Pass 2: {len(figures2)} additional figures")
+            _safe_print(f"  [DI] page {pn} Pass 2: {len(figures2)} additional figures")
             result1.figures = list(figures1) + list(figures2)
 
         return pn, result1, pass1_count, summary, dest_img
@@ -568,8 +713,8 @@ def run_step2a(settings):
             page_summaries[pn] = summary
             done += 1
             total_figs = len(getattr(result, "figures", []) or [])
-            page_status[pn] = f"✅ {total_figs} figures"
-            bar.progress(done / (len(pages) + 1), f"Phase A: DI {done}/{len(pages)} pages done")
+            page_status[pn] = f"✅{total_figs}"
+            bar.progress(done / (len(pages) + 1), f"Phase A: {done}/{len(pages)}")
             _update_status_a()
 
     # Reconstruct page_image_paths in page order
@@ -617,8 +762,11 @@ def run_step2a(settings):
                         "crop_path": str(crop_path),
                     })
         rbp[pn] = regions
+        # Update status with actual post-dedup count (raw DI count may include duplicates)
+        page_status[pn] = f"✅{len(regions)}"
+        _update_status_a()
         total = sum(len(v) for v in rbp.values())
-        print(f"  [DI] page {pn}: {len(regions)} regions")
+        _safe_print(f"  [DI] page {pn}: {len(regions)} regions")
 
     _ss("di_regions_by_page", rbp)
     _ss("regions_by_page", rbp)
@@ -644,19 +792,25 @@ def run_step2b(settings):
     deploy = settings.azure_openai_deployment
 
     output_root = settings.output_path / "di_detection"
+    import shutil as _shutil
     crops_root = settings.output_path / "missing_detection"
     crops_temp = settings.output_path / "missing_det_temp"
+    # Clean previous run results to avoid stale files
+    if crops_root.exists():
+        _shutil.rmtree(crops_root)
+    if crops_temp.exists():
+        _shutil.rmtree(crops_temp)
     crops_root.mkdir(parents=True, exist_ok=True)
     crops_temp.mkdir(parents=True, exist_ok=True)
 
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    bar = st.progress(0, "Phase B: LLM missing‐image detection (parallel) …")
-    status_container_b = st.container()
-    page_status_b = {pg.page_num: "⏳ waiting" for pg in pages}
+    bar = st.progress(0, "Phase B: LLM missing‐image detection …")
+    status_container_b = st.empty()
+    page_status_b = {pg.page_num: "⏳" for pg in pages}
     def _update_status_b():
-        lines = [f"**Page {pn}**: {s}" for pn, s in sorted(page_status_b.items())]
-        status_container_b.markdown(" · ".join(lines), unsafe_allow_html=True)
+        parts = [f"P{pn}:{s}" for pn, s in sorted(page_status_b.items())]
+        status_container_b.caption(" · ".join(parts))
     _update_status_b()
     t0 = time.time()
     reports = []
@@ -673,9 +827,10 @@ def run_step2b(settings):
                 crops_root=crops_root,
                 crops_temp_root=crops_temp,
                 max_iterations=3,
-                detection_reasoning_effort="none",
-                verification_reasoning_effort="low",
+                detection_reasoning_effort=None,
+                verification_reasoning_effort="medium",
                 page_dpi_map=page_dpi_map,
+                run_crop_check=True,
             )
             return result
         except Exception as e:
@@ -692,11 +847,11 @@ def run_step2b(settings):
             if result:
                 reports.append(result)
                 n_v = result.get("n_verified", 0)
-                page_status_b[pn] = f"✅ +{n_v} new"
+                page_status_b[pn] = f"✅+{n_v}"
             else:
-                page_status_b[pn] = "❌ error"
+                page_status_b[pn] = "❌"
             done += 1
-            bar.progress(done / len(pages), f"Phase B: {done}/{len(pages)} pages done")
+            bar.progress(done / len(pages), f"Phase B: {done}/{len(pages)}")
             _update_status_b()
 
     # Post-process: clip to content bbox, drop duplicates
@@ -704,19 +859,17 @@ def run_step2b(settings):
         bar.progress(0.9, "Post-processing crops …")
         postprocess_crops(reports, output_root, crops_root)
 
-    # Rebuild regions_by_page from all final crops
-    di_rbp = _s("di_regions_by_page", {})
-    rbp = {}
-    for pg in pages:
-        pn = pg.page_num
-        regions = []
-
-        # DI regions (from phase A)
-        for r in di_rbp.get(pn, []):
-            regions.append(r)
-
-        # New LLM-detected regions from crops_root
+    # Collect dropped DI indices and verified LLM crops from pipeline reports
+    dropped_di_by_page = {}  # pn -> set of DI crop indices dropped as non-electrical
+    verified_llm_by_page = {}  # pn -> list of verified LLM crop bboxes from this run
+    for r in reports:
+        pn = r["page_num"]
+        di = r.get("dropped_indices", [])
+        if di:
+            dropped_di_by_page[pn] = set(di)
+        # Read verified LLM crops from crops_root (freshly written by this run)
         page_crop_dir = crops_root / f"page{pn}"
+        llm_crops = []
         if page_crop_dir.exists():
             base_img = cv2.imread(str(output_root / f"page{pn}" / f"page{pn}.png"))
             if base_img is not None:
@@ -740,20 +893,78 @@ def run_step2b(settings):
                         except Exception:
                             pass
                     if bbox:
-                        # Skip if overlaps with existing DI region
-                        if any(_iou(bbox, r["bbox"]) > 0.5 for r in regions):
-                            continue
                         label = crop_path.stem.split("_")[-1]
-                        regions.append({
+                        llm_crops.append({
                             "bbox": bbox, "source": "llm",
                             "label": f"LLM-{label}",
                             "crop_path": str(crop_path),
                         })
+        verified_llm_by_page[pn] = llm_crops
+
+    # Rebuild regions_by_page from DI + verified LLM crops
+    di_rbp = _s("di_regions_by_page", {})
+    rbp = {}
+    def _bbox_area_fn(b):
+        return max(0, b[2] - b[0]) * max(0, b[3] - b[1])
+    def _inter_area_fn(a, b):
+        l, t, r2, b2 = max(a[0], b[0]), max(a[1], b[1]), min(a[2], b[2]), min(a[3], b[3])
+        return max(0, r2 - l) * max(0, b2 - t) if r2 > l and b2 > t else 0
+    for pg in pages:
+        pn = pg.page_num
+        regions = []
+
+        # DI regions (from phase A) — skip those dropped as non-electrical
+        dropped_set = dropped_di_by_page.get(pn, set())
+        for r in di_rbp.get(pn, []):
+            # Extract the DI crop index from the label (e.g. "DI-1" -> 1)
+            try:
+                di_idx = int(r.get("label", "").split("-")[-1])
+            except (ValueError, IndexError):
+                di_idx = None
+            if di_idx is not None and di_idx in dropped_set:
+                _safe_print(f"  page {pn}: dropping DI region {r.get('label')} (non-electrical)")
+                continue
+            regions.append(r)
+
+        # Add verified LLM crops from this run
+        # Only skip if LLM region is a sub-region (>=85% contained) of an existing DI region.
+        # Partial overlaps are kept — both regions are needed for complete coverage.
+        for llm_r in verified_llm_by_page.get(pn, []):
+            llm_area = max(0, llm_r["bbox"][2] - llm_r["bbox"][0]) * max(0, llm_r["bbox"][3] - llm_r["bbox"][1])
+            if llm_area > 0 and any(
+                _inter_area_fn(llm_r["bbox"], r["bbox"]) / llm_area >= 0.85
+                for r in regions
+                if _bbox_area_fn(r["bbox"]) >= llm_area
+            ):
+                _safe_print(f"  page {pn}: skipping LLM {llm_r.get('label')} (sub-region of existing DI)")
+                continue
+            regions.append(llm_r)
+
+        # Final containment filter: drop any region >=85% inside a larger region
+        filtered = []
+        for i, ri in enumerate(regions):
+            ai = _bbox_area_fn(ri["bbox"])
+            if ai <= 0:
+                filtered.append(ri)
+                continue
+            contained = False
+            for j, rj in enumerate(regions):
+                if i == j:
+                    continue
+                aj = _bbox_area_fn(rj["bbox"])
+                inter = _inter_area_fn(ri["bbox"], rj["bbox"])
+                if ai <= aj and ai > 0 and inter / ai >= 0.85:
+                    _safe_print(f"  page {pn}: dropping {ri.get('label')} (sub-region of {rj.get('label')})")
+                    contained = True
+                    break
+            if not contained:
+                filtered.append(ri)
+        regions = filtered
 
         rbp[pn] = regions
         n_di = sum(1 for r in regions if r["source"] == "di")
         n_llm = sum(1 for r in regions if r["source"] == "llm")
-        print(f"  page {pn}: {n_di} DI + {n_llm} LLM = {len(regions)} total")
+        _safe_print(f"  page {pn}: {n_di} DI + {n_llm} LLM = {len(regions)} total")
 
     _ss("regions_by_page", rbp)
     _ss("missing_detection_done", True)
@@ -763,6 +974,23 @@ def run_step2b(settings):
     bar.empty()
     total = sum(len(v) for v in rbp.values())
     n_new = total - sum(len(v) for v in di_rbp.values())
+    # Save checkpoint with both DI and merged regions
+    _save_checkpoint(settings, "step2", {
+        "di_regions_by_page": {str(k): v for k, v in di_rbp.items()},
+        "regions_by_page": {str(k): v for k, v in rbp.items()},
+        "regions_confirmed": False,
+        "step_timings": {k: timings.get(k) for k in ("step2a", "step2b") if k in timings},
+    })
+    # Persist to Azure
+    _persist().persist_step(
+        _run_id(), 2, "step2",
+        result_data={
+            "di_regions_by_page": {str(k): v for k, v in di_rbp.items()},
+            "regions_by_page": {str(k): v for k, v in rbp.items()},
+        },
+        local_artifact_dir=settings.output_path / "di_detection",
+        pdf_path=_s("pdf_path"),
+    )
     st.success(f"LLM found {n_new} additional regions. Total: {total} across {len(pages)} pages. ({_fmt_elapsed(elapsed)})")
 
 
@@ -929,13 +1157,52 @@ def run_step3(settings):
     from src.models.page import PageInfo
     from src.tools.di_tools import create_di_client, analyze_page
 
-    from src.cad.panel_name_extractor import extract_panel_names_from_tile, dedup_panel_names_for_page
+    from src.cad.panel_name_extractor import (
+        extract_panel_names_from_tile, dedup_panel_names_for_page,
+        verify_panel_names_with_full_page, select_best_reference_image,
+    )
     from src.cad.panel_bbox_matcher import run_bbox_matching
     from src.cad.figure_subcropping import discover_crops, tile_crops
 
     pages = [PageInfo(**p) for p in _active_pages()]
     client = _llm(settings)
     deploy = settings.azure_openai_deployment
+
+    # ── Load visual reference images (supports multiple) ─────────────────
+    import base64 as _b64
+    _example_imgs_b64: list = []
+
+    # Check sidebar selection first
+    vp_panel = _s("visual_prompts", {}).get("panel_name")
+    if isinstance(vp_panel, list) and vp_panel:
+        _chosen = [p for p in vp_panel if p and Path(p).exists()]
+        for _ref_path in [Path(p) for p in _chosen]:
+            _example_imgs_b64.append(_b64.b64encode(_ref_path.read_bytes()).decode())
+        if _example_imgs_b64:
+            _safe_print(f"[Step3] Visual references (user-selected): {[Path(p).name for p in _chosen]}")
+
+    # Auto-select via LLM if no user selection
+    if not _example_imgs_b64:
+        _candidates = [
+            VISUAL_PROMPT_DIR / "panel_name_box_example1.png",
+            VISUAL_PROMPT_DIR / "panel_name_box_example2.png",
+        ]
+        _candidates = [p for p in _candidates if p.exists()]
+        if _candidates:
+            # Use the first available page image as sample
+            _sample_img = None
+            for pg in pages:
+                _sample_img = cv2.imread(pg.png_path)
+                if _sample_img is not None:
+                    break
+            if _sample_img is not None:
+                _best = select_best_reference_image(
+                    _sample_img, _candidates, client, deploy,
+                    category="panel name box",
+                )
+                if _best and _best.exists():
+                    _example_imgs_b64.append(_b64.b64encode(_best.read_bytes()).decode())
+                    _safe_print(f"[Step3] Visual reference (auto-selected): {_best.name}")
 
     # ── DI client ─────────────────────────────────────────────────────────
     if "di_client" not in st.session_state:
@@ -986,7 +1253,7 @@ def run_step3(settings):
                 split_threshold_inch=7.0,
             )
     except Exception as e:
-        print(f"[Step3] Smart tiling failed, falling back to simple tiling: {e}")
+        _safe_print(f"[Step3] Smart tiling failed, falling back to simple tiling: {e}")
         _safe_print_exc()
 
     # Fallback: simple fixed-width tiling for pages without tiles
@@ -997,7 +1264,7 @@ def run_step3(settings):
             if img is None:
                 continue
             h, w = img.shape[:2]
-            tile_width, overlap = 2000, 400
+            tile_width, overlap = 1200, 400
             tile_bboxes = []
             x = 0
             while x < w:
@@ -1023,14 +1290,21 @@ def run_step3(settings):
             tile_img = full_img[ty1:ty2, tx1:tx2]
             names, _elapsed = extract_panel_names_from_tile(
                 tile_img, client, deploy,
+                example_imgs_b64=_example_imgs_b64,
             )
             if names:
                 tile_cands.extend(names)
-            print(f"  page {pn} tile{ti}: {len(names) if names else 0} candidates: {(names or [])[:5]}")
-        verified, _elapsed = dedup_panel_names_for_page(
+            _safe_print(f"  page {pn} tile{ti}: {len(names) if names else 0} candidates: {(names or [])[:5]}")
+        deduped, _elapsed = dedup_panel_names_for_page(
             tile_cands, full_img, client, deploy,
         )
-        print(f"  page {pn}: {len(tile_cands)} candidates → {len(verified)} verified: {verified[:5]}")
+        _safe_print(f"  page {pn}: {len(tile_cands)} candidates → {len(deduped)} deduped: {deduped[:5]}")
+        # Full-page verification
+        verified, _v_elapsed = verify_panel_names_with_full_page(
+            deduped, full_img, client, deploy,
+            example_imgs_b64=_example_imgs_b64,
+        )
+        _safe_print(f"  page {pn}: {len(deduped)} deduped → {len(verified)} verified: {verified[:5]}")
         return pn, verified, tile_bboxes
 
     done = 0
@@ -1061,10 +1335,10 @@ def run_step3(settings):
                         break
                 else:
                     line["tile_idx"] = 0
-            print(f"  page {pn}: DI found {len(lines)} lines")
+            _safe_print(f"  page {pn}: DI found {len(lines)} lines")
             return pn, lines
         except Exception as e:
-            print(f"  [WARN] DI failed for page {pn}: {e}")
+            _safe_print(f"  [WARN] DI failed for page {pn}: {e}")
             return pn, []
 
     with ThreadPoolExecutor(max_workers=min(len(pages), 3)) as ex:
@@ -1117,6 +1391,21 @@ def run_step3(settings):
     elapsed = time.time() - t0
     timings = _s("step_timings", {}); timings["step3"] = elapsed; _ss("step_timings", timings)
     bar.empty()
+    _save_checkpoint(settings, "step3", {
+        "names_by_page": {str(k): v for k, v in nbp.items()},
+        "matches_by_page": {str(k): v for k, v in mbp.items()},
+        "names_confirmed": False,
+        "step_timings": {"step3": elapsed},
+    })
+    # Persist to Azure
+    _persist().persist_step(
+        _run_id(), 3, "step3",
+        result_data={
+            "names_by_page": {str(k): v for k, v in nbp.items()},
+            "matches_by_page": {str(k): v for k, v in mbp.items()},
+        },
+        pdf_path=_s("pdf_path"),
+    )
 
 def render_step3():
     st.markdown('<span class="step-badge">Step 3</span>',unsafe_allow_html=True)
@@ -1136,12 +1425,16 @@ def render_step3():
         names=list(nbp.get(pn,nbp.get(str(pn),[]))); matches=dict(mbp.get(pn,mbp.get(str(pn),{})))
         st.markdown(f'<div class="gbb-card"><b>Page {pn}</b> — {len(names)} panel names</div>',unsafe_allow_html=True)
         img=_load_img(pg["png_path"])
-        # --- Tabs: Image | Panel Names | Edit ---
-        if not confirmed:
-            tab_img,tab_names,tab_edit=st.tabs(["🖼 Image","📋 Panel Names","✏️ Edit"])
-        else:
-            tab_img,tab_names=st.tabs(["🖼 Image","📋 Panel Names"]); tab_edit=None
-        with tab_img:
+        # --- View mode: Image | Panel Names | Edit ---
+        # Use st.radio instead of st.tabs so only the active view is rendered.
+        # st.tabs renders ALL tab content (including hidden tabs) simultaneously,
+        # which breaks Fabric.js canvas initialisation (0-dimension container).
+        _view_opts = ["🖼 Image","📋 Panel Names","✏️ Edit"] if not confirmed else ["🖼 Image","📋 Panel Names"]
+        _view_mode = st.radio("View", _view_opts, horizontal=True, key=f"s3_view_{pn}", label_visibility="collapsed")
+        _show_img = (_view_mode == "🖼 Image")
+        _show_names = (_view_mode == "📋 Panel Names")
+        _show_edit = (_view_mode == "✏️ Edit") and not confirmed
+        if _show_img:
             # Draw all bboxes; highlight selected name
             overlay=img.copy(); font=cv2.FONT_HERSHEY_SIMPLEX
             for name in names:
@@ -1162,10 +1455,14 @@ def render_step3():
             cap=f"Page {pn} — Panel name locations"
             if hl_name and pn==hl_page: cap+=f"  ★ {hl_name}"
             st.image(_bgr_to_rgb(overlay),caption=cap,use_container_width=True)
-        with tab_names:
+        if _show_names:
             # Clickable name list
             for i,name in enumerate(names):
                 m=matches.get(name); conf=m.get("confidence",0) if m else 0
+                try:
+                    conf=float(conf)
+                except (TypeError,ValueError):
+                    conf=0.0
                 method=m.get("method","—") if m else "—"
                 has_bbox="✓" if (m and m.get("bbox")) else "✗"
                 is_sel=(name==hl_name and pn==hl_page)
@@ -1177,8 +1474,7 @@ def render_step3():
                     else:
                         _ss("s3_hl_name",name); _ss("s3_hl_page",pn)
                     st.rerun()
-        if tab_edit is not None:
-            with tab_edit:
+        if _show_edit:
                 DISP_W_S3 = 700
                 h_orig, w_orig = img.shape[:2]
                 scale_s3 = DISP_W_S3 / w_orig
@@ -1315,15 +1611,48 @@ def run_step4(settings):
     client = _llm(settings)
     deploy = settings.azure_openai_deployment
 
-    # Load guide images as np arrays
-    vp_raw = _s("visual_prompts", {}).get("area_split")
-    if isinstance(vp_raw, list):
-        guide_paths = [p for p in vp_raw if p and Path(p).exists()]
-    elif vp_raw and Path(vp_raw).exists():
-        guide_paths = [vp_raw]
+    # Load guide images as np arrays — separate panel_area vs bay_split
+    # ── Panel Area guide images ──
+    vp_area = _s("visual_prompts", {}).get("panel_area")
+    if not vp_area:
+        # Legacy fallback: old "area_split" key may still be in session state
+        vp_area = _s("visual_prompts", {}).get("area_split")
+    if isinstance(vp_area, list):
+        area_paths = [p for p in vp_area if p and Path(p).exists()]
+    elif vp_area and Path(vp_area).exists():
+        area_paths = [vp_area]
     else:
-        guide_paths = []
-    guide_images = [cv2.imread(str(p)) for p in guide_paths if cv2.imread(str(p)) is not None]
+        area_paths = []
+
+    if not area_paths:
+        _default_area_refs = [
+            VISUAL_PROMPT_DIR / "panel_box_explanation.png",
+            VISUAL_PROMPT_DIR / "panel_box_explanation1.png",
+        ]
+        area_paths = [str(p) for p in _default_area_refs if p.exists()]
+        if area_paths:
+            _safe_print(f"[Step4] Panel area guide images auto-defaulted: {[Path(p).name for p in area_paths]}")
+
+    guide_images = [cv2.imread(str(p)) for p in area_paths if cv2.imread(str(p)) is not None]
+
+    # ── Bay Split guide images ──
+    vp_bay = _s("visual_prompts", {}).get("bay_split")
+    if isinstance(vp_bay, list):
+        bay_paths = [p for p in vp_bay if p and Path(p).exists()]
+    elif vp_bay and Path(vp_bay).exists():
+        bay_paths = [vp_bay]
+    else:
+        bay_paths = []
+
+    if not bay_paths:
+        _default_bay_refs = [
+            VISUAL_PROMPT_DIR / "bay_example.png",
+        ]
+        bay_paths = [str(p) for p in _default_bay_refs if p.exists()]
+        if bay_paths:
+            _safe_print(f"[Step4] Bay split guide images auto-defaulted: {[Path(p).name for p in bay_paths]}")
+
+    bay_guide_images = [cv2.imread(str(p)) for p in bay_paths if cv2.imread(str(p)) is not None]
 
     out = settings.output_path
     t0 = time.time()
@@ -1337,12 +1666,12 @@ def run_step4(settings):
         regions = rbp.get(pn, rbp.get(str(pn), []))
 
         if not names:
-            print(f"[Step4] Page {pn}: SKIP — no names found")
+            _safe_print(f"[Step4] Page {pn}: SKIP — no names found")
             return pn, [], []
 
         full_img = cv2.imread(pg.png_path)
         if full_img is None:
-            print(f"[Step4] Page {pn}: cannot load image")
+            _safe_print(f"[Step4] Page {pn}: cannot load image")
             return pn, [], []
 
         h_full, w_full = full_img.shape[:2]
@@ -1383,7 +1712,7 @@ def run_step4(settings):
                 "bbox_offset": [0, 0],
             })
 
-        print(f"[Step4] Page {pn}: {len(names)} names, {len(crop_items)} crops")
+        _safe_print(f"[Step4] Page {pn}: {len(names)} names, {len(crop_items)} crops")
 
         all_results = []
         all_bays = []
@@ -1440,7 +1769,7 @@ def run_step4(settings):
                 )
             except Exception as e:
                 _safe_print_exc()
-                print(f"[Step4] Page {pn} crop{crop_idx}: ERROR — {e}")
+                _safe_print(f"[Step4] Page {pn} crop{crop_idx}: ERROR — {e}")
                 results = []
 
             # Convert results: crop-local bbox → full-page bbox, save panel crops
@@ -1491,7 +1820,7 @@ def run_step4(settings):
                 # Bay splitting
                 hc, wc = cv2.imread(cp).shape[:2] if Path(cp).exists() else (0, 0)
                 bay_result = process_one_bay_split(
-                    client, deploy, guide_images,
+                    client, deploy, bay_guide_images,
                     panel_name=panel_name,
                     panel_img_path=Path(cp),
                     out_dir=out / f"bay_page{pn}",
@@ -1534,6 +1863,19 @@ def run_step4(settings):
     timings["step4"] = elapsed
     _ss("step_timings", timings)
     bar.empty()
+    _save_checkpoint(settings, "step4", {
+        "panel_crops": ac, "bay_results": ab,
+        "crops_confirmed": False,
+        "step_timings": {"step4": elapsed},
+    })
+    # Persist to Azure
+    _persist().persist_step(
+        _run_id(), 4, "step4",
+        result_data={"panel_crops": ac, "bay_results": ab},
+        local_artifact_dir=settings.output_path / "crops",
+        pdf_path=_s("pdf_path"),
+    )
+
 
 def render_step4():
     st_canvas = _st_canvas_fn if _CANVAS_AVAILABLE else None
@@ -1546,7 +1888,7 @@ def render_step4():
     # Show timing
     t4 = _s("step_timings", {}).get("step4")
     if t4:
-        st.markdown(f'<div class="info-banner">Located <b>{len(crops)} panels</b> {_elapsed_html(t4)}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="info-banner">Located <b>{len(crops)} panels</b> via <b>LLM Vision</b> {_elapsed_html(t4)}</div>', unsafe_allow_html=True)
     cc=list(COLORS_BGR.values()); font=cv2.FONT_HERSHEY_SIMPLEX
     HEX_COLORS=["#0078D4","#5C2D91","#008B8B","#B4009E","#00BCF2","#7FBA00","#3A96DD"]
     byp={}
@@ -1821,7 +2163,7 @@ def run_step5(settings):
                 image_paths=[cp],label=f"bom {c['panel_name']}")
             return c["panel_name"],result
         except Exception as e:
-            print(f"  [BOM ERROR] {c['panel_name']}: {e}")
+            _safe_print(f"  [BOM ERROR] {c['panel_name']}: {e}")
             return c["panel_name"],f"ERROR: {e}"
     with ThreadPoolExecutor(max_workers=min(len(crops),5)) as ex:
         futs={ex.submit(_proc,c):c for c in crops}
@@ -1833,6 +2175,24 @@ def run_step5(settings):
     elapsed = time.time() - t0
     timings = _s("step_timings", {}); timings["step5"] = elapsed; _ss("step_timings", timings)
     bar.empty()
+    _save_checkpoint(settings, "step5", {
+        "bom_results": bom, "bom_confirmed": False,
+        "step_timings": {"step5": elapsed},
+    })
+    # Persist to Azure
+    _persist().persist_step(
+        _run_id(), 5, "step5",
+        result_data={"bom_results": bom},
+        pdf_path=_s("pdf_path"),
+    )
+    # Mark run as completed
+    try:
+        from src.state.models import RunStatus
+        _persist().update_run_flags(
+            _run_id(), status=RunStatus.COMPLETED, bom_confirmed=False
+        )
+    except Exception:
+        pass
 
 def render_step5():
     st.markdown('<span class="step-badge">Step 5</span>',unsafe_allow_html=True)
@@ -1844,14 +2204,14 @@ def render_step5():
     t5 = _s("step_timings", {}).get("step5")
     if t5:
         st.markdown(f'<div class="info-banner">Extracted BOM for <b>{len(crops)} panels</b> {_elapsed_html(t5)}</div>', unsafe_allow_html=True)
-    for c in crops:
+    for ci, c in enumerate(crops):
         name=c["panel_name"]; result=bom.get(name,"")
         cp=c.get("crop_path")
         is_error = result.startswith("ERROR:") if result else False
         with st.expander(f"{'⚠️ ' if is_error else ''}{name} — BOM",expanded=True):
             if is_error:
                 st.markdown(f'<div class="error-banner"><b>Error extracting BOM:</b> {result}</div>', unsafe_allow_html=True)
-                if st.button(f"🔄 Retry {name}", key=f"retry_bom_{name}"):
+                if st.button(f"🔄 Retry {name}", key=f"retry_bom_{name}_{ci}"):
                     from src.agents.llm_caller import call_llm
                     settings = _load_settings()
                     client = _llm(settings)
@@ -1871,9 +2231,9 @@ def render_step5():
                     st.warning("No crop image")
             with cols[1]:
                 if not confirmed:
-                    view_mode = st.radio("View", ["📊 Table", "✏️ Edit"], key=f"bom_view_{name}", horizontal=True)
+                    view_mode = st.radio("View", ["📊 Table", "✏️ Edit"], key=f"bom_view_{name}_{ci}", horizontal=True)
                     if view_mode == "✏️ Edit":
-                        edited=st.text_area("BOM Result",value=result,height=400,key=f"bom_{name}")
+                        edited=st.text_area("BOM Result",value=result,height=400,key=f"bom_{name}_{ci}")
                         if edited!=result:
                             bom[name]=edited; _ss("bom_results",bom)
                     else:
@@ -1893,18 +2253,21 @@ def render_step5():
 # ══════════════════════════════════════════════════════════════════
 def _render_vp_sidebar():
     st.sidebar.markdown("---"); st.sidebar.markdown("**Visual Prompts**")
-    # Sample visual prompts
+    # Sample visual prompts — 3 separate categories
     _VP_SAMPLES = {
         "panel_name": [
             VISUAL_PROMPT_DIR / "panel_name_box_example1.png",
             VISUAL_PROMPT_DIR / "panel_name_box_example2.png",
         ],
-        "area_split": [
+        "panel_area": [
             VISUAL_PROMPT_DIR / "panel_box_explanation.png",
+            VISUAL_PROMPT_DIR / "panel_box_explanation1.png",
+        ],
+        "bay_split": [
             VISUAL_PROMPT_DIR / "bay_example.png",
         ],
     }
-    for label,key in [("Panel Name Detection","panel_name"),("Panel Area Detection","area_split")]:
+    for label,key in [("Panel Name Detection","panel_name"),("Panel Area Detection","panel_area"),("Bay Split","bay_split")]:
         st.sidebar.markdown(f"**{label}:**")
         samples = [p for p in _VP_SAMPLES.get(key, []) if p.exists()]
         opts=[p.name for p in samples]
@@ -1947,16 +2310,65 @@ def main():
         '<span style="font-size:.75rem;color:#0078D4;font-weight:600;display:inline-flex;align-items:center;gap:5px;"><img src="https://gbb.azureai.win/assets-gbb/logo/gbb-icon-color.svg" style="height:14px;display:inline-block;vertical-align:middle;"/> Global Black Belt · AI Apps</span>',
         unsafe_allow_html=True)
     st.sidebar.markdown("---")
+
+    def _reset_pipeline_state():
+        """Reset all pipeline state when switching PDF files."""
+        # Only delete known pipeline state keys; leave Streamlit internal widget keys intact
+        pipeline_keys = {
+            "step", "current_view", "pdf_path",
+            "pages", "selected_pages",
+            "di_regions_by_page", "di_detection_done",
+            "missing_detection_done",
+            "regions_by_page", "regions_confirmed",
+            "names_by_page", "matches_by_page", "names_confirmed",
+            "panel_crops", "bay_results", "crops_confirmed",
+            "bom_results", "bom_confirmed",
+            "visual_prompts",
+            "step_timings", "step_errors",
+            "_last_uploaded_name", "_last_test_pdf",
+            "_ckpt_restored",
+            "_run_id", "_persistence_layer",
+        }
+        for k in list(st.session_state.keys()):
+            if k in pipeline_keys:
+                del st.session_state[k]
+        # Clear cached output files (pages, thumbs) so they regenerate for the new PDF
+        import shutil
+        pages_dir = settings.output_path / "pages"
+        if pages_dir.exists():
+            shutil.rmtree(pages_dir)
+        _init()
+
     uploaded=st.sidebar.file_uploader("Upload PDF",type=["pdf"],key="pdf_up")
-    if uploaded and not _s("pdf_path"):
-        ud=settings.output_path/"uploads"; ud.mkdir(parents=True,exist_ok=True)
-        p=ud/uploaded.name; p.write_bytes(uploaded.read()); _ss("pdf_path",str(p))
-    test_pdfs=list(VISUAL_PROMPT_DIR.glob("*.pdf")) if VISUAL_PROMPT_DIR.exists() else []
+    if uploaded:
+        prev_upload = _s("_last_uploaded_name")
+        if prev_upload != uploaded.name:
+            ud=settings.output_path/"uploads"; ud.mkdir(parents=True,exist_ok=True)
+            p=ud/uploaded.name; p.write_bytes(uploaded.read())
+            _reset_pipeline_state()
+            _ss("pdf_path",str(p)); _ss("_last_uploaded_name", uploaded.name)
+            _ss("_last_test_pdf", None)
+            _ss("test_pdf", "—")
+            st.rerun()
+    test_pdfs=sorted(VISUAL_PROMPT_DIR.glob("*.pdf")) if VISUAL_PROMPT_DIR.exists() else []
     if test_pdfs:
         st.sidebar.markdown("**Or use a test PDF:**")
         opts=["—"]+[p.name for p in test_pdfs]
         choice=st.sidebar.selectbox("Test PDF",opts,key="test_pdf")
-        if choice!="—": _ss("pdf_path",str(VISUAL_PROMPT_DIR/choice))
+        if choice!="—":
+            new_path = str(VISUAL_PROMPT_DIR/choice)
+            if _s("pdf_path") != new_path:
+                _reset_pipeline_state()
+                _ss("pdf_path", new_path)
+                _ss("_last_test_pdf", choice)
+                _ss("_last_uploaded_name", None)
+                st.rerun()
+    # Auto-restore checkpoints when PDF selected but pipeline not loaded
+    if _s("pdf_path") and _s("step", 0) == 0 and not _s("_ckpt_restored"):
+        restored = _restore_all_checkpoints(settings)
+        _ss("_ckpt_restored", True)
+        if restored > 0:
+            st.rerun()
     step=_s("step",0)
     st.sidebar.markdown("---")
     # ── Pipeline Stepper (visual) ──
@@ -2037,10 +2449,11 @@ def main():
     _render_vp_sidebar()
     st.sidebar.markdown("---")
     if st.sidebar.button("Reset",use_container_width=True):
-        for k in list(st.session_state.keys()):
-            if k not in ("pdf_up","test_pdf"): del st.session_state[k]
+        _reset_pipeline_state()
         st.rerun()
     st.sidebar.caption("v3 DI+LLM | Phase A: DI, Phase B: LLM")
+    _storage_mode = "☁️ Cloud" if _load_settings().enable_persistent_state else "💾 Local"
+    st.sidebar.caption(f"Storage: {_storage_mode}")
 
     # ── Main ──
     st.markdown("# Electrical SLD (Single Line Diagram) BOM Extraction\n"
@@ -2102,8 +2515,15 @@ def main():
             _ss("current_view",target); st.rerun()
 
     if cv==0:
+        # If navigated back to Step 1 but pages data is missing, restore from checkpoint
+        if step >= 1 and not _s("pages", []):
+            _restore_step1(settings)
         if step==0:
             if st.button("Run Step 1: Upload & Convert",type="primary",use_container_width=True):
+                with st.spinner("Converting…"): run_step1(pdf,settings)
+                st.rerun()
+        else:
+            if st.button("🔄 Re-run Step 1",use_container_width=True):
                 with st.spinner("Converting…"): run_step1(pdf,settings)
                 st.rerun()
         render_step1()
@@ -2121,14 +2541,13 @@ def main():
             if not di_done:
                 if st.button("Run Step 2: Figure Detection",type="primary",use_container_width=True):
                     try:
-                        with st.spinner("Running Phase A: DI detection (Pass 1 + 2)…"): run_step2a(settings)
+                        with st.spinner("Running Phase A: DI detection …"): run_step2a(settings)
                         errs = _s("step_errors", {}); errs.pop("step2a", None); _ss("step_errors", errs)
                     except Exception as e:
                         errs = _s("step_errors", {}); errs["step2a"] = str(e); _ss("step_errors", errs)
                         st.error(f"Step 2A failed: {e}")
                         _safe_print_exc()
                         st.rerun()
-                    # Auto-run Phase B after Phase A succeeds
                     try:
                         with st.spinner("Running Phase B: LLM missing-image detection…"): run_step2b(settings)
                         errs = _s("step_errors", {}); errs.pop("step2b", None); _ss("step_errors", errs)
@@ -2138,7 +2557,6 @@ def main():
                         _safe_print_exc()
                     st.rerun()
             elif not missing_done:
-                # Fallback: if 2A done but 2B not (e.g. previous error), allow manual retry
                 if st.button("Retry Step 2B: LLM Missing Detection",type="primary",use_container_width=True):
                     try:
                         with st.spinner("Running LLM missing-image detection…"): run_step2b(settings)
@@ -2147,6 +2565,11 @@ def main():
                         errs = _s("step_errors", {}); errs["step2b"] = str(e); _ss("step_errors", errs)
                         st.error(f"Step 2B failed: {e}")
                         _safe_print_exc()
+                    st.rerun()
+            else:
+                if st.button("🔄 Re-run Step 2",use_container_width=True):
+                    _ss("di_detection_done", False); _ss("missing_detection_done", False)
+                    _ss("regions_confirmed", False)
                     st.rerun()
             render_step2()
             if step>=2 and _s("regions_confirmed"):
@@ -2167,6 +2590,10 @@ def main():
                         st.error(f"Step 3 failed: {e}")
                         _safe_print_exc()
                     st.rerun()
+            elif step>=3:
+                if st.button("🔄 Re-run Step 3",use_container_width=True):
+                    _ss("step", 2); _ss("names_confirmed", False)
+                    st.rerun()
             render_step3()
             if step>=3 and _s("names_confirmed"):
                 st.markdown("---"); _nb(3,"Step 4: Panel Areas + Bay","next3")
@@ -2178,14 +2605,19 @@ def main():
             if last_err:
                 st.markdown(f'<div class="error-banner"><b>Last error:</b> {last_err}</div>', unsafe_allow_html=True)
             if step==3 or last_err:
-                if st.button("Run Step 4: Panel Areas + Bay",type="primary",use_container_width=True):
+                if st.button("Run Step 4: LLM Panel Areas + Bay", type="primary", use_container_width=True):
                     try:
-                        with st.spinner("Detecting areas…"): run_step4(settings)
+                        with st.spinner("Detecting areas…"):
+                            run_step4(settings)
                         errs = _s("step_errors", {}); errs.pop("step4", None); _ss("step_errors", errs)
                     except Exception as e:
                         errs = _s("step_errors", {}); errs["step4"] = str(e); _ss("step_errors", errs)
                         st.error(f"Step 4 failed: {e}")
                         _safe_print_exc()
+                    st.rerun()
+            elif step>=4:
+                if st.button("🔄 Re-run Step 4",use_container_width=True):
+                    _ss("step", 3); _ss("crops_confirmed", False)
                     st.rerun()
             render_step4()
             if step>=4 and _s("crops_confirmed"):

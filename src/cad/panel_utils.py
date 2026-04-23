@@ -75,14 +75,15 @@ def call_llm(
     images: List[np.ndarray],
     label: str = "",
     reasoning_effort: str = "medium",
+    detail: str = "high",
 ) -> str:
     content = [{"type": "input_text", "text": prompt}]
     for im in images:
-        content.append({"type": "input_image", "image_url": _img_to_data_url(im), "detail": "original"})
+        content.append({"type": "input_image", "image_url": _img_to_data_url(im), "detail": detail})
 
     t0 = time.time()
     tag = f"[{label}]" if label else ""
-    print(f"    LLM{tag} calling (effort={reasoning_effort})... ", end="", flush=True)
+    print(f"    LLM{tag} calling (effort={reasoning_effort}, detail={detail})... ", end="", flush=True)
     resp = client.responses.create(
         model=deployment,
         input=[{"role": "user", "content": content}],

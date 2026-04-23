@@ -85,26 +85,40 @@ VERIFY_SCHEMA = {
 }
 
 
+def _guide_desc(num_guides: int) -> str:
+    """Build the reference image description block for N guide images."""
+    lines = []
+    for i in range(1, num_guides + 1):
+        lines.append(f"- Image{i} (panel_box_explanation): A panel box is the region where electrical equipment is arranged,")
+        lines.append(f"  marked together with the panel name. Boundary line styles may vary by drawing;")
+        lines.append(f"  the examples in the image show representative patterns.")
+        if i == 1:
+            lines.append("  Example 1) A closed rectangle with dashed lines on all 4 sides.")
+            lines.append("  Example 2) Top/bottom = dashed lines, right = solid line, left = Gap + vertical solid line.")
+            lines.append("  Example 3) Non-rectangular (L-shaped / ㄱ-shaped) panel — return the full outer rectangle")
+            lines.append("    that wraps the entire region, along with any sub-regions to exclude (exclude_regions)")
+            lines.append("    when the panel is not a rectangular shape.")
+            lines.append("  (Not limited to these 3 patterns only.)")
+    return '\n'.join(lines)
+
+
 def build_locate_prompt(
     panel_name: str,
     width: int,
     height: int,
     grid_size: int,
     locate_schema: Dict,
+    num_guides: int = 1,
 ) -> str:
+    g = num_guides  # first non-guide image index
     return f"""
 Goal: Find a single bbox that encloses the entire area of electrical panel "{panel_name}".
 
 [Reference image description]
-- Image1 (panel_box_explanation): A panel box is the region where electrical equipment is arranged,
-  marked together with the panel name. Boundary line styles may vary by drawing;
-  the examples in the image show representative patterns.
-  Example 1) A closed rectangle with dashed lines on all 4 sides.
-  Example 2) Top/bottom = dashed lines, right = solid line, left = Gap + vertical solid line.
-  Example 3) Non-rectangular (L-shaped / ㄱ-shaped) panel — return the full outer rectangle
-    that wraps the entire region, along with any sub-regions to exclude (exclude_regions)
-    when the panel is not a rectangular shape.
-  (Not limited to these 3 patterns only.)
+{_guide_desc(g)}
+
+[Input image]
+- Image{g+1}: the full crop with grid overlay and panel name locations marked.
 
 [STEP 1] Locate the target panel
 - The position indicated by the blue box (NAME:{panel_name}) is the exact coordinate of the
@@ -185,14 +199,28 @@ BAY_SCHEMA = {
 }
 
 
-def build_bay_prompt(panel_name: str, width: int, height: int, grid_size: int, schema: Dict) -> str:
+def _bay_guide_desc(num_guides: int) -> str:
+    """Build the reference image description block for bay guide images."""
+    lines = []
+    for i in range(1, num_guides + 1):
+        lines.append(f"- Image{i} (bay_example): Guide to how bays are divided when 1 panel is split into multiple bays.")
+        if i == 1:
+            lines.append("  Bays are separated by the combination of a Gap (empty space) + vertical solid line.")
+    return '\n'.join(lines)
+
+
+def build_bay_prompt(panel_name: str, width: int, height: int, grid_size: int, schema: Dict, num_guides: int = 1) -> str:
+    g = num_guides
+    overlay_idx = g + 1
     return f"""
 Goal: Find the bay dividers within the electrical panel "{panel_name}" image and return the bbox for each bay.
 (The entire input image is the area of this panel.)
 
 [Reference image description]
-- Image1 (bay_example): Guide to how bays are divided when 1 panel is split into multiple bays.
-  Bays are separated by the combination of a Gap (empty space) + vertical solid line.
+{_bay_guide_desc(g)}
+
+[Input image]
+- Image{overlay_idx}: the panel image with grid overlay.
 
 [STEP 1] Count the number of bays
 - Scan the image horizontally and count how many bays are separated by Gap + vertical solid lines.
@@ -260,25 +288,19 @@ def build_locate_all_prompt(
     height: int,
     grid_size: int,
     schema: Dict,
+    num_guides: int = 1,
 ) -> str:
+    g = num_guides
     names_str = ', '.join(f'"{n}"' for n in panel_names)
     return f"""
 Goal: Find a bbox enclosing the entire area of EACH of the following electrical panels IN ONE RESPONSE.
 Panel names: {names_str}
 
 [Reference image description]
-- Image1 (panel_box_explanation): A panel box is the region where electrical equipment is arranged,
-  marked together with the panel name. Boundary line styles may vary by drawing;
-  the examples in the image show representative patterns.
-  Example 1) A closed rectangle with dashed lines on all 4 sides.
-  Example 2) Top/bottom = dashed lines, right = solid line, left = Gap + vertical solid line.
-  Example 3) Non-rectangular (L-shaped / ㄱ-shaped) panel — return the full outer rectangle
-    that wraps the entire region, along with any sub-regions to exclude (exclude_regions)
-    when the panel is not a rectangular shape.
-  (Not limited to these 3 patterns only.)
+{_guide_desc(g)}
 
 [Input image]
-- The image shows the full crop with ALL panel name locations marked as blue "NAME:panel_name" boxes.
+- Image{g+1}: the full crop with ALL panel name locations marked as blue "NAME:panel_name" boxes.
 
 [STEP 0] FIRST — systematic boundary line analysis (MANDATORY)
 Before locating any individual panel, you MUST perform this analysis:
@@ -419,21 +441,25 @@ def build_verify_all_prompt(
     width: int,
     height: int,
     schema: Dict,
+    num_guides: int = 1,
 ) -> str:
     """Build a batch verify prompt for N panels in a single LLM call.
 
     Image layout expected by this prompt:
-      Image1       : panel_box_explanation (guide)
-      Image2       : combined overlay (all PANEL:name boxes + all NAME:name boxes)
-      Image3+      : individual panel crops, one per panel, in the same order as `panels`
+      Image1..N    : panel_box_explanation guide(s)
+      Image(N+1)   : combined overlay (all PANEL:name boxes + all NAME:name boxes)
+      Image(N+2)+  : individual panel crops, one per panel, in the same order as `panels`
     """
+    g = num_guides
+    overlay_idx = g + 1
+    first_crop_idx = g + 2
     names_str = ', '.join(f'"{p["name"]}"' for p in panels)
 
     # Per-panel bbox summary block
     bbox_lines = []
     for i, p in enumerate(panels):
         x1, y1, x2, y2 = p['bbox']
-        img_idx = i + 3  # Image3 = first crop
+        img_idx = i + first_crop_idx
         excl = p.get('exclude_regions', [])
         excl_str = f', exclude_regions={json.dumps(excl)}' if excl else ''
         bbox_lines.append(
@@ -445,9 +471,9 @@ def build_verify_all_prompt(
     edge_blocks = []
     for i, p in enumerate(panels):
         x1, y1, x2, y2 = p['bbox']
-        img_idx = i + 3
+        img_idx = i + first_crop_idx
         edge_blocks.append(
-            f'Panel "{p["name"]}" (Image{img_idx}, PANEL:{p["name"]} box in Image2):\n'
+            f'Panel "{p["name"]}" (Image{img_idx}, PANEL:{p["name"]} box in Image{overlay_idx}):\n'
             f'  x1={x1}: ok→delta=0/corrected={x1} | expand→corrected={x1}-delta | shrink→corrected={x1}+delta\n'
             f'  y1={y1}: ok→delta=0/corrected={y1} | expand→corrected={y1}-delta | shrink→corrected={y1}+delta\n'
             f'  x2={x2}: ok→delta=0/corrected={x2} | expand→corrected={x2}+delta | shrink→corrected={x2}-delta\n'
@@ -459,19 +485,11 @@ def build_verify_all_prompt(
         f"Goal: Verify that each of the following {len(panels)} electrical panel crops is correct.\n"
         f"Panels: {names_str}\n\n"
         "[Reference image description]\n"
-        "- Image1 (panel_box_explanation): A panel box is the region where electrical equipment is arranged,\n"
-        "  marked together with the panel name. Boundary line styles may vary by drawing;\n"
-        "  the examples in the image show representative patterns.\n"
-        "  Example 1) A closed rectangle with dashed lines on all 4 sides.\n"
-        "  Example 2) Top/bottom = dashed lines, right = solid line, left = Gap + vertical solid line.\n"
-        "  Example 3) Non-rectangular (L-shaped / ㄱ-shaped) panel — return the full outer rectangle\n"
-        "    that wraps the entire region, along with any sub-regions to exclude (exclude_regions)\n"
-        "    when the panel is not a rectangular shape.\n"
-        "  (Not limited to these 3 patterns only.)\n\n"
+        f"{_guide_desc(g)}\n\n"
         "[Input images]\n"
-        "- Image2: combined grid overlay — shows ALL panels' current PANEL:name boxes (orange) and\n"
+        f"- Image{overlay_idx}: combined grid overlay — shows ALL panels' current PANEL:name boxes (orange) and\n"
         "  all NAME:name boxes (blue). Use this to understand spatial relationships between panels.\n"
-        "- Image3+: individual crop images for each panel in the order below.\n\n"
+        f"- Image{first_crop_idx}+: individual crop images for each panel in the order below.\n\n"
         f"Current PANEL bboxes (image size: width={width}, height={height}):\n"
         f"{bbox_block}\n\n"
         "Verification purpose: When extracting the BOM from each crop, can all electrical components\n"
@@ -515,21 +533,16 @@ def build_verify_all_prompt(
     )
 
 
-def build_verify_prompt(verify_schema: Dict, bbox: list, width: int, height: int, exclude_regions: list = None) -> str:
+def build_verify_prompt(verify_schema: Dict, bbox: list, width: int, height: int, exclude_regions: list = None, num_guides: int = 1) -> str:
+    g = num_guides
+    overlay_idx = g + 1
+    crop_idx = g + 2
     x1, y1, x2, y2 = bbox
     return (
         "Goal: Verify that the orange box (PANEL) region is a correct electrical panel crop.\n"
         "First identify which panel it is using the panel name text shown in the blue box (NAME:panel name).\n\n"
         "[Reference image description]\n"
-        "- Image1 (panel_box_explanation): A panel box is the region where electrical equipment is arranged,\n"
-        "  marked together with the panel name. Boundary line styles may vary by drawing;\n"
-        "  the examples in the image show representative patterns.\n"
-        "  Example 1) A closed rectangle with dashed lines on all 4 sides.\n"
-        "  Example 2) Top/bottom = dashed lines, right = solid line, left = Gap + vertical solid line.\n"
-        "  Example 3) Non-rectangular (L-shaped / ㄱ-shaped) panel — return the full outer rectangle\n"
-        "    that wraps the entire region, along with any sub-regions to exclude (exclude_regions)\n"
-        "    when the panel is not a rectangular shape.\n"
-        "  (Not limited to these 3 patterns only.)\n\n"
+        f"{_guide_desc(g)}\n\n"
         f"Current PANEL bbox: [x1={x1}, y1={y1}, x2={x2}, y2={y2}]\n"
         f"Image size: width={width}, height={height}\n\n"
         "Verification purpose: When extracting the BOM (bill of materials) from this crop, can all\n"
@@ -591,12 +604,12 @@ def build_verify_prompt(verify_schema: Dict, bbox: list, width: int, height: int
            "  Verify and update these if needed based on the corrected_bbox.\n"
            if exclude_regions else "") +
         "\nInput images:\n"
-        "- Image1: panel_box_explanation (panel boundary examples)\n"
-        "- Image2: grid overlay (showing panel area extracted with PANEL box)\n"
+        f"- Image1..{g}: panel_box_explanation (panel boundary examples)\n"
+        f"- Image{overlay_idx}: grid overlay (showing panel area extracted with PANEL box)\n"
         "  · PANEL box  = extracted panel region\n"
         "  · Blue box   = NAME:panel name (location of target panel name text)\n"
         "  · Green box  = OTHER:panel name (locations of adjacent panel name texts)\n"
-        "- Image3: actual cropped panel image\n\n"
+        f"- Image{crop_idx}: actual cropped panel image\n\n"
         "Return JSON only:\n"
         + json.dumps(verify_schema, ensure_ascii=False, indent=2)
     )

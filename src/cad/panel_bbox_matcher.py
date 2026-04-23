@@ -513,6 +513,208 @@ def resolve_bbox_conflicts(
     }
 
 
+# ── Cross-reference filter: "FROM …" / "TO: …" context detection ─────────
+
+# Regex for cross-reference annotations surrounding a panel name.
+_CROSSREF_RE = _re.compile(
+    r"\b(?:from|to|ref|see|via|cable)\b",
+    _re.IGNORECASE,
+)
+
+
+def resolve_multi_position_matches(
+    page_matches: Dict[str, List[dict]],
+    di_lines: list,
+    page_img=None,
+    llm_client=None,
+    deployment: str = "",
+    page_num: int = 0,
+) -> Dict[str, List[dict]]:
+    """When a panel name matches multiple distinct bboxes, pick the best one.
+
+    Heuristics (applied in order):
+    1. **Cross-reference penalty**: if the DI line text around the match
+       contains "FROM", "TO:", "REF", etc. — it is likely a cable-route
+       annotation, not the actual panel header.  Demote such candidates.
+    2. **Spatial consistency**: prefer the candidate whose Y-position aligns
+       with the majority of other matched panels (panel headers tend to
+       share a small set of Y-rows).
+    3. **LLM visual tiebreak**: if still ambiguous, send a cropped image
+       with all candidate bboxes highlighted and ask the LLM to pick
+       the actual panel bay header.
+
+    Only names with ≥ 2 hits are processed; single-hit names pass through.
+    """
+    out: Dict[str, List[dict]] = {}
+
+    # Collect Y-row centres of single-hit panels (reference pattern)
+    ref_cy_list: list = []
+    for name, hits in page_matches.items():
+        if len(hits) == 1:
+            bb = hits[0]["bbox"]
+            ref_cy_list.append((bb[1] + bb[3]) / 2)
+
+    for name, hits in page_matches.items():
+        if len(hits) <= 1:
+            out[name] = hits
+            continue
+
+        # ── Score each candidate ──────────────────────────────────────────
+        scored: list = []
+        for hit in hits:
+            penalty = 0
+            bb = hit["bbox"]
+            cy = (bb[1] + bb[3]) / 2
+
+            # 1. Cross-reference context: check the DI lines near this bbox
+            #    for "FROM", "TO:", etc.
+            for dl in di_lines:
+                dl_bb = dl["bbox"]
+                # Check lines vertically close (same row, ±20px) and
+                # horizontally near (within 300px)
+                if (abs((dl_bb[1] + dl_bb[3]) / 2 - cy) <= 20
+                        and abs(dl_bb[0] - bb[0]) <= 300):
+                    if _CROSSREF_RE.search(dl["content"]):
+                        penalty += 100
+                        break
+
+            # Also check the matched DI line text itself
+            line_text = " ".join(l["content"] for l in hit.get("lines", []))
+            if _CROSSREF_RE.search(line_text):
+                penalty += 100
+
+            # 2. Spatial consistency: how close is this candidate's cy to
+            #    the most common row among other matched panels?
+            if ref_cy_list:
+                min_dist = min(abs(cy - rcy) for rcy in ref_cy_list)
+                penalty += min_dist  # Closer to existing rows → lower penalty
+
+            scored.append((penalty, hit))
+
+        scored.sort(key=lambda x: x[0])
+        best_penalty = scored[0][0]
+        second_penalty = scored[1][0] if len(scored) > 1 else best_penalty
+
+        # If the best candidate is clearly better (penalty gap ≥ 30), pick it
+        if second_penalty - best_penalty >= 30:
+            out[name] = [scored[0][1]]
+            print(
+                f"  [multi-pos] page {page_num}: '{name}' — "
+                f"{len(hits)} candidates, picked bbox={scored[0][1]['bbox']} "
+                f"(penalty={best_penalty:.0f} vs {second_penalty:.0f})"
+            )
+            continue
+
+        # ── 3. LLM tiebreak ──────────────────────────────────────────────
+        if llm_client and page_img is not None:
+            chosen = _llm_pick_best_position(
+                name, [s[1] for s in scored], page_img,
+                llm_client, deployment, page_num,
+            )
+            if chosen is not None:
+                out[name] = [chosen]
+                print(
+                    f"  [multi-pos] page {page_num}: '{name}' — "
+                    f"LLM picked bbox={chosen['bbox']}"
+                )
+                continue
+
+        # Fallback: keep the lowest-penalty candidate
+        out[name] = [scored[0][1]]
+        print(
+            f"  [multi-pos] page {page_num}: '{name}' — "
+            f"fallback to lowest penalty bbox={scored[0][1]['bbox']}"
+        )
+
+    return out
+
+
+def _llm_pick_best_position(
+    panel_name: str,
+    candidates: List[dict],
+    page_img,
+    llm_client,
+    deployment: str,
+    page_num: int,
+) -> Optional[dict]:
+    """Ask LLM to pick the correct bbox among multiple candidates.
+
+    Each candidate bbox is drawn on the page image with a label (A, B, C, …).
+    The LLM sees the image and picks the one that is the actual panel bay header.
+    """
+    import numpy as np
+
+    h, w = page_img.shape[:2]
+    # Compute a crop region that includes all candidates + context
+    pad = 150
+    all_x1 = max(0, min(c["bbox"][0] for c in candidates) - pad)
+    all_y1 = max(0, min(c["bbox"][1] for c in candidates) - pad)
+    all_x2 = min(w, max(c["bbox"][2] for c in candidates) + pad)
+    all_y2 = min(h, max(c["bbox"][3] for c in candidates) + pad)
+    crop = page_img[int(all_y1):int(all_y2), int(all_x1):int(all_x2)].copy()
+
+    labels = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    colors = [(0, 0, 255), (255, 0, 0), (0, 180, 0), (255, 165, 0), (128, 0, 128)]
+    bbox_descs: list = []
+    for i, cand in enumerate(candidates):
+        bb = cand["bbox"]
+        lx1 = int(bb[0] - all_x1)
+        ly1 = int(bb[1] - all_y1)
+        lx2 = int(bb[2] - all_x1)
+        ly2 = int(bb[3] - all_y1)
+        color = colors[i % len(colors)]
+        label = labels[i]
+        cv2.rectangle(crop, (lx1, ly1), (lx2, ly2), color, 3)
+        cv2.putText(crop, label, (lx1, max(ly1 - 8, 20)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.2, color, 3)
+        line_text = " ".join(l["content"] for l in cand.get("lines", []))
+        bbox_descs.append(f"  {label}: bbox={list(bb)}, OCR text=\"{line_text}\"")
+
+    _, buf = cv2.imencode(".jpg", crop, [cv2.IMWRITE_JPEG_QUALITY, 85])
+    img_b64 = base64.b64encode(buf).decode()
+
+    prompt = (
+        f"Panel name: \"{panel_name}\"\n\n"
+        f"This name appears at {len(candidates)} locations on the SLD page.\n"
+        "The image shows all candidate locations marked with colored boxes and labels.\n\n"
+        "Candidates:\n" + "\n".join(bbox_descs) + "\n\n"
+        "Rules:\n"
+        "- Panel bay header names are printed at the TOP of rectangular panel boxes/sections.\n"
+        "- Cross-reference annotations like 'FROM ... (E-H-01B)' or 'TO: PANEL-X' "
+        "are NOT panel headers — they are cable routing labels.\n"
+        "- The correct match is the one that labels an actual panel bay section.\n\n"
+        "Which label (A, B, C, …) is the actual panel bay header?\n"
+        "Respond with JSON: {\"choice\": \"A\"}"
+    )
+
+    content = [
+        {"type": "text", "text": prompt},
+        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}", "detail": "high"}},
+    ]
+    try:
+        import time as _time
+        _t0 = _time.time()
+        resp = llm_client.chat.completions.create(
+            model=deployment,
+            messages=[{"role": "user", "content": content}],
+            temperature=0,
+            response_format={"type": "json_object"},
+        )
+        _elapsed = round(_time.time() - _t0, 3)
+        from .panel_utils import log_llm_call
+        log_llm_call("multi_pos_tiebreak", _elapsed, 1,
+                     reasoning_effort="none", source="panel_bbox_matcher")
+        body = json.loads(resp.choices[0].message.content)
+        choice = body.get("choice", "A").upper().strip()
+        idx = labels.index(choice) if choice in labels else -1
+        if 0 <= idx < len(candidates):
+            return candidates[idx]
+    except Exception as exc:
+        print(f"  [multi-pos] LLM tiebreak error: {exc}")
+
+    return None
+
+
 # ── LLM batch call ────────────────────────────────────────────────────────────
 
 def _llm_call_batch(
@@ -581,7 +783,7 @@ def _llm_call_batch(
     if img_b64:
         content.append({
             "type": "image_url",
-            "image_url": {"url": f"data:image/jpeg;base64,{img_b64}", "detail": "original"},
+            "image_url": {"url": f"data:image/jpeg;base64,{img_b64}", "detail": "high"},
         })
     import time as _time
     _t0 = _time.time()
@@ -1276,6 +1478,52 @@ def run_bbox_matching(
         merged_di[pn] = merged
     di_lines_by_page = merged_di
 
+    # ── Dedup: remove bare name when (UPPER)/(LOWER) suffixed variant exists ──
+    for _ps in list(result["by_page"].keys()):
+        _names = result["by_page"][_ps]
+        _suffixed_bases: set = set()
+        for _n in _names:
+            _m = _re.match(r'^(.+?)\s*\((?:UPPER|LOWER)\)$', _n, _re.IGNORECASE)
+            if _m:
+                _suffixed_bases.add(_m.group(1).strip())
+        if _suffixed_bases:
+            _before = len(_names)
+            _names = [_n for _n in _names if _n not in _suffixed_bases]
+            _removed = _before - len(_names)
+            if _removed:
+                print(f"  page {_ps}: removed {_removed} bare name(s) superseded by (UPPER)/(LOWER) variants")
+            result["by_page"][_ps] = _names
+
+    # ── DI-guided supplement: discover panel names the LLM missed ─────────────
+    # If a DI line contains an already-extracted name preceded by a valid
+    # alphanumeric prefix (e.g. "NGR-E-TR-01B" when "E-TR-01B" is known),
+    # add the longer form as an additional panel name.
+    for _ps in list(result["by_page"].keys()):
+        _pn = int(_ps)
+        _names = result["by_page"][_ps]
+        _names_set = set(_names)
+        _di_lines = di_lines_by_page.get(_pn, [])
+        _new_names: list = []
+        for _name in _names:
+            _esc = _re.escape(_name)
+            _pat = _re.compile(
+                r'([A-Z0-9][-A-Z0-9]*[-_ ])' + _esc + r'(?:\s|$)',
+                _re.IGNORECASE,
+            )
+            for _dl in _di_lines:
+                _dt = _dl["content"].strip()
+                _m = _pat.search(_dt)
+                if _m:
+                    _full = _m.group(0).rstrip()
+                    _prefix = _m.group(1).rstrip('-_ ')
+                    if (_full not in _names_set
+                            and _re.match(r'^[A-Z0-9][-A-Z0-9]*$', _prefix, _re.IGNORECASE)):
+                        _new_names.append(_full)
+                        _names_set.add(_full)
+        if _new_names:
+            result["by_page"][_ps].extend(_new_names)
+            print(f"  page {_ps}: added {len(_new_names)} DI-discovered name(s): {_new_names}")
+
     # ── Group DI lines by (page_num, tile_idx) ────────────────────────────────
     tile_di_groups = _group_di_lines_by_tile(di_lines_by_page, tiles_by_page)
 
@@ -1408,6 +1656,23 @@ def run_bbox_matching(
     for pn in list(panel_bbox_matches):
         panel_bbox_matches[pn] = resolve_bbox_conflicts(panel_bbox_matches[pn])
 
+    # ── Resolve multi-position matches: when one name matches multiple bboxes ─
+    multi_pos_pages = {
+        pn for pn, pm in panel_bbox_matches.items()
+        if any(len(ms) > 1 for ms in pm.values())
+    }
+    if multi_pos_pages:
+        print("\nResolving multi-position matches:")
+        for pn in sorted(multi_pos_pages):
+            panel_bbox_matches[pn] = resolve_multi_position_matches(
+                panel_bbox_matches[pn],
+                di_lines_by_page.get(pn, []),
+                page_img=page_images.get(pn),
+                llm_client=llm_client,
+                deployment=deployment,
+                page_num=pn,
+            )
+
     # Serial name correction: fix OCR digit errors using spatial row order
     panel_bbox_matches, result, serial_corrections = correct_serial_outliers(
         panel_bbox_matches, result
@@ -1536,11 +1801,26 @@ def _save_bbox_by_image(
         offset_map[(int(page_num), int(crop_idx))] = (cx1, cy1)
 
     by_image: dict = {"by_page": {}}
+
     for pn in sorted(panel_bbox_matches.keys()):
         page_key = str(pn)
         by_image["by_page"][page_key] = {}
         for name, hits in panel_bbox_matches[pn].items():
-            for hit in (hits or []):
+            # ── Rank multi-candidate bboxes by text-length ratio ─────
+            # Principle: a true panel label has DI text ≈ the panel name
+            # (ratio close to 1.0), while a cross-reference note embeds
+            # the name inside longer text (ratio << 1.0).
+            # This is keyword-free and works across any drawing style.
+            name_alen = max(len(_alphanum_only(name)), 1)
+
+            def _match_quality(h):
+                di_text = " ".join(l.get("content", "") for l in h.get("lines", []))
+                di_alen = max(len(_alphanum_only(di_text)), 1)
+                # Higher ratio → DI text is mostly the panel name → better match
+                return -(name_alen / di_alen)  # negate for ascending sort
+
+            sorted_hits = sorted((hits or []), key=_match_quality)
+            for hit in sorted_hits:
                 lines = hit.get("lines") or []
                 if not lines:
                     continue

@@ -200,6 +200,64 @@ make test-e2e
 | `GET` | `/api/results/{id}` | Get final results |
 | `GET` | `/health` | Health check |
 
+## Azure Infrastructure (Persistent State)
+
+파이프라인 상태를 영구 저장하고, 동일 파일 캐싱 및 실시간 진행 상태 추적을 위한 Azure 인프라.
+
+### Resources
+
+| Resource | Purpose | SKU |
+|----------|---------|-----|
+| **Cosmos DB** (Serverless) | 파이프라인 실행 상태, 단계별 상태, 파일 캐시 메타데이터 | Serverless |
+| **Blob Storage** | 중간 결과물 (이미지, JSON) 영구 저장 | Standard LRS |
+| **Service Bus** | 비동기 작업 큐, 실시간 진행 상태 이벤트 | Standard |
+
+### Deploy Infrastructure
+
+```bash
+# 1. Login to Azure
+az login
+
+# 2. Deploy dev environment (Korea Central)
+./infra/deploy.sh dev koreacentral
+
+# 3. Deploy prod environment
+./infra/deploy.sh prod koreacentral
+```
+
+배포 후 `.env.dev.azure` 파일이 자동 생성됩니다. 해당 값을 `.env` 파일에 복사하세요.
+
+### Infrastructure Files
+
+```
+infra/
+├── main.bicep              # 메인 템플릿 (3개 모듈 오케스트레이션)
+├── modules/
+│   ├── cosmosdb.bicep       # Cosmos DB Serverless + 3 containers
+│   ├── storage.bicep        # Blob Storage + lifecycle policy
+│   └── servicebus.bicep     # Service Bus + queue + topic
+├── parameters/
+│   ├── dev.bicepparam       # 개발 환경 파라미터
+│   └── prod.bicepparam      # 운영 환경 파라미터
+├── deploy.sh                # 배포 스크립트
+└── teardown.sh              # 인프라 삭제 스크립트
+```
+
+### Teardown
+
+```bash
+./infra/teardown.sh dev      # dev 환경 삭제
+./infra/teardown.sh prod     # prod 환경 삭제
+```
+
+### Required Python Packages (for state management)
+
+```bash
+pip install azure-cosmos azure-storage-blob azure-servicebus
+```
+
+> 전체 계획은 [docs/persistent-state-plan.md](docs/persistent-state-plan.md) 참조.
+
 ## Key Design Decisions
 
 - **Multi-stage pipeline** — each stage has a dedicated executor class

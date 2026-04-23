@@ -72,6 +72,33 @@ _DEDUP_SCHEMA = {
     "required": ["panel_names"],
 }
 
+_VERIFY_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "panel_names": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": (
+                "Complete list of all panel bay names visible on this page. "
+                "Includes names from the candidate list plus any additional names "
+                "you can see in the image that were missed."
+            ),
+        },
+        "added": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Names that were NOT in the candidate list but are visible in the image.",
+        },
+        "removed": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Names from the candidate list that are NOT actually panel bay names (false positives).",
+        },
+        "reasoning": {"type": "string"},
+    },
+    "required": ["panel_names"],
+}
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Internal helpers
@@ -129,7 +156,7 @@ def _call_llm(
 ) -> str:
     content: List[dict] = [{"type": "input_text", "text": prompt}]
     for url in image_urls:
-        content.append({"type": "input_image", "image_url": url, "detail": "original"})
+        content.append({"type": "input_image", "image_url": url, "detail": "high"})
     t0 = time.time()
     tag = f" [{label}]" if label else ""
     print(f"  LLM{tag} calling...", end=" ", flush=True)
@@ -146,6 +173,84 @@ def _call_llm(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Auto-select reference image
+# ─────────────────────────────────────────────────────────────────────────────
+
+_SELECT_REF_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "choice": {
+            "type": "integer",
+            "description": "1-based index of the reference image that best matches the SLD page style.",
+        },
+        "reasoning": {"type": "string"},
+    },
+    "required": ["choice"],
+}
+
+
+def select_best_reference_image(
+    sample_page_img: np.ndarray,
+    candidate_paths: List[Path],
+    llm_client,
+    deployment: str,
+    category: str = "panel_name",
+) -> Optional[Path]:
+    """Use LLM to pick the best-matching reference image for the given SLD page.
+
+    Args:
+        sample_page_img: A sample page image from the uploaded PDF.
+        candidate_paths: List of reference image file paths to choose from.
+        llm_client: Azure OpenAI client.
+        deployment: Model deployment name.
+        category: Description of what the reference is for (for the prompt).
+
+    Returns:
+        The Path of the best-matching reference, or None on failure.
+    """
+    if not candidate_paths:
+        return None
+    if len(candidate_paths) == 1:
+        return candidate_paths[0]
+
+    # Build image list: page first, then candidates
+    image_urls = [_img_to_data_url(sample_page_img)]
+    for cp in candidate_paths:
+        img = cv2.imread(str(cp))
+        if img is not None:
+            image_urls.append(_img_to_data_url(img))
+
+    ref_labels = "\n".join(
+        f"  Image {i+2}: {cp.name}" for i, cp in enumerate(candidate_paths)
+    )
+
+    prompt = (
+        f"You are selecting the best visual reference image for {category} extraction "
+        "from an electrical Single Line Diagram (SLD).\n\n"
+        "## Image 1: Sample page from the uploaded SLD document\n"
+        "This is one page of the document being processed.\n\n"
+        "## Reference image candidates:\n"
+        f"{ref_labels}\n\n"
+        "## Task\n"
+        "Compare the visual style of the SLD page (Image 1) with each reference candidate.\n"
+        "Pick the reference image whose panel label style (font, box shape, naming convention) "
+        "most closely matches the uploaded document.\n\n"
+        "Return JSON:\n" + json.dumps(_SELECT_REF_SCHEMA, indent=2)
+    )
+
+    raw, elapsed = _call_llm(llm_client, deployment, prompt, image_urls, label="select-ref")
+    result = _parse_json(raw)
+    if result is None:
+        return candidate_paths[0]
+
+    choice = result.get("choice", 1)
+    idx = max(0, min(choice - 1, len(candidate_paths) - 1))
+    reasoning = result.get("reasoning", "")
+    print(f"  [select-ref] Chose {candidate_paths[idx].name}: {reasoning[:120]}")
+    return candidate_paths[idx]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Public API
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -154,6 +259,7 @@ def extract_panel_names_from_tile(
     llm_client,
     deployment: str,
     example_img_b64: Optional[str] = None,
+    example_imgs_b64: Optional[List[str]] = None,
 ) -> Tuple[Optional[List[str]], float]:
     """Ask LLM to list panel bay labels visible in a single tile image.
 
@@ -161,36 +267,48 @@ def extract_panel_names_from_tile(
         (list[str], elapsed_s) — panel names found + LLM call time
         (None, elapsed_s)      — tile has no panel section boxes
     """
-    example_preamble = (
-        "## Reference image (Image 1)\n"
-        "Image 1 is a sample crop from the SAME document you are analyzing.\n"
-        "It shows examples of PANEL NAMES from this drawing with annotations.\n"
-        "Study Image 1 to learn:\n"
-        "  • The exact visual style of panel name label boxes in this document\n"
-        "    (shape, border style, position, font, 1-line vs 2-line format)\n"
-        "  • Which boxes are panel name labels (blue outlines)\n"
-        "  • How to combine 2-line labels into one string\n"
-        "  • RED X = label box cut off at the edge → omit this name\n"
-        "  • RED TEXT = additional rules specific to this drawing\n"
-        "Use the panel name examples in Image 1 as the reference when\n"
-        "extracting panel names from Image 2 (the actual tile).\n\n"
-    ) if example_img_b64 else ""
+    # Normalise: support both single image (legacy) and list
+    _refs: List[str] = []
+    if example_imgs_b64:
+        _refs = list(example_imgs_b64)
+    elif example_img_b64:
+        _refs = [example_img_b64]
+    n_refs = len(_refs)
+    tile_img_idx = n_refs + 1  # 1-based index for the tile image
+
+    example_preamble = ""
+    if _refs:
+        ref_range = "Image 1" if n_refs == 1 else f"Image 1..{n_refs}"
+        example_preamble = (
+            f"## Reference images ({ref_range})\n"
+            f"{ref_range} {'is a sample crop' if n_refs == 1 else 'are sample crops'} from the SAME document you are analyzing.\n"
+            f"{'It shows' if n_refs == 1 else 'They show'} examples of PANEL NAMES from this drawing with annotations.\n"
+            f"Study {ref_range} to learn:\n"
+            "  • The exact visual style of panel name label boxes in this document\n"
+            "    (shape, border style, position, font, 1-line vs 2-line format)\n"
+            "  • Which boxes are panel name labels (blue outlines)\n"
+            "  • How to combine 2-line labels into one string\n"
+            "  • RED X = label box cut off at the edge → omit this name\n"
+            "  • RED TEXT = additional rules specific to this drawing\n"
+            f"Use the panel name examples in {ref_range} as the reference when\n"
+            f"extracting panel names from Image {tile_img_idx} (the actual tile).\n\n"
+        )
 
     step1 = (
         "## Step 1 — Identify the label pattern\n"
-        "Image 1 shows examples of PANEL NAMES from this document.\n"
-        "Use those examples as your reference: find labels in Image 2 that match the same\n"
-        "shape, border, position, and format as the panel name examples in Image 1.\n\n"
-        if example_img_b64 else
-        "## Step 1 — Identify the label pattern\n"
-        "Find the repeating bordered boxes (rectangle or hexagon) that name each bay.\n"
-        "Note shape, position, and line count. Apply the pattern consistently to all bays.\n\n"
+        + (f"{ref_range} {'shows' if n_refs == 1 else 'show'} examples of PANEL NAMES from this document.\n"
+           f"Use those examples as your reference: find labels in Image {tile_img_idx} that match the same\n"
+           f"shape, border, position, and format as the panel name examples in {ref_range}.\n\n"
+           if _refs else
+           "Find the repeating bordered boxes (rectangle or hexagon) that name each bay.\n"
+           "Note shape, position, and line count. Apply the pattern consistently to all bays.\n\n"
+           )
     )
 
     prompt = (
         ("You are analyzing a cropped section of an electrical Single Line Diagram (SLD).\n\n"
          + example_preamble)
-        if example_img_b64 else
+        if _refs else
         "You are analyzing a cropped section of an electrical Single Line Diagram (SLD).\n\n"
     ) + (
         "## Task\n"
@@ -225,6 +343,10 @@ def extract_panel_names_from_tile(
         "- Labels accompanied by 'TO:' text — these are feeder/circuit destination identifiers,\n"
         "  not panel bay names (e.g. a box showing 'MCCE-1-F1' next to 'TO: ATS-1-F1' is a\n"
         "  feeder label, not a bay name)\n"
+        "- Cross-reference annotations: text such as 'FROM C.S U-4.2 SUBSTATION (E-H-01B)'\n"
+        "  or 'TO: PANEL-X' mentions a panel from ANOTHER part of the drawing. These are\n"
+        "  cable routing references, NOT panel bay names for THIS section. Only extract names\n"
+        "  that serve as the section/zone label for an enclosed bay area in this tile.\n"
         "- Individual equipment/component type codes on device symbols (breakers, transformers,\n"
         "  current/voltage sensors, protection relays, switches, etc.) — these name a device,\n"
         "  not a bay area. Note: 'UPS', 'BAT' combined with a floor/number identifier\n"
@@ -239,8 +361,8 @@ def extract_panel_names_from_tile(
         "Return JSON only:\n" + json.dumps(_EXTRACT_SCHEMA, indent=2)
     )
     image_urls: List[str] = []
-    if example_img_b64:
-        image_urls.append(f"data:image/png;base64,{example_img_b64}")
+    for _rb64 in _refs:
+        image_urls.append(f"data:image/png;base64,{_rb64}")
     image_urls.append(_img_to_data_url(tile_img))
     raw, elapsed = _call_llm(llm_client, deployment, prompt, image_urls, label="extract")
     result = _parse_json(raw)
@@ -386,6 +508,101 @@ def dedup_panel_names_for_page(
     return _fill_series_gaps(allowed), elapsed
 
 
+def verify_panel_names_with_full_page(
+    candidate_names: List[str],
+    full_page_img: np.ndarray,
+    llm_client,
+    deployment: str,
+    example_img_b64: Optional[str] = None,
+    example_imgs_b64: Optional[List[str]] = None,
+) -> Tuple[List[str], float]:
+    """Verify and complete panel names using the full-page image.
+
+    Sends the full page image to LLM along with the candidate list from tiled
+    extraction.  The LLM checks for missed names and removes false positives.
+
+    Returns (final_names, elapsed_s).
+    """
+    if not candidate_names:
+        return [], 0.0
+
+    # Normalise: support both single image (legacy) and list
+    _refs: List[str] = []
+    if example_imgs_b64:
+        _refs = list(example_imgs_b64)
+    elif example_img_b64:
+        _refs = [example_img_b64]
+    n_refs = len(_refs)
+    page_img_idx = n_refs + 1
+
+    candidates_json = json.dumps(candidate_names, indent=2)
+
+    example_preamble = ""
+    if _refs:
+        ref_range = "Image 1" if n_refs == 1 else f"Image 1..{n_refs}"
+        example_preamble = (
+            f"## Reference images ({ref_range})\n"
+            f"{ref_range} {'shows' if n_refs == 1 else 'show'} examples of panel name label boxes from this document.\n"
+            "BLUE outlines = panel name labels.  RED X = cut-off labels to ignore.\n"
+            f"Use {ref_range} to learn the visual style, then apply it to Image {page_img_idx}.\n\n"
+        )
+
+    prompt = (
+        "You are verifying panel bay name extraction for one page of an electrical SLD.\n\n"
+        + example_preamble
+        + f"## Image {page_img_idx}: Full page image\n"
+        "The attached image is the FULL PAGE of the SLD drawing.\n\n"
+        "## Candidate panel names (from tiled extraction)\n"
+        f"{candidates_json}\n\n"
+        "## Your task\n"
+        "1. Scan the ENTIRE page image carefully from left edge to right edge.\n"
+        "   Find ALL panel bay name labels — short alphanumeric codes in bordered boxes\n"
+        "   (rectangles or hexagons) that identify sections/zones of the switchboard.\n"
+        "   Pay special attention to SMALLER or AUXILIARY sections near page edges\n"
+        "   (e.g., distribution boards, transformer bays, NGR sections) — these are\n"
+        "   easily missed but are valid panel bays.\n"
+        "2. Compare what you see with the candidate list above.\n"
+        "3. ADD any panel names visible in the image that are missing from the candidates.\n"
+        "4. REMOVE any candidate names that are NOT actually panel bay names:\n"
+        "   - Equipment labels, component codes, hallucinated names\n"
+        "   - Cross-reference annotations: text like 'FROM C.S U-4.2 SUBSTATION (E-H-01B)'\n"
+        "     or 'TO: PANEL-X' that references a panel from ANOTHER page/section.\n"
+        "     These mention a panel name but the panel itself is NOT on this page.\n"
+        "     A valid panel name must label a bounded area on THIS page containing\n"
+        "     electrical components (breakers, busbars, CTs, etc.).\n\n"
+        "## Rules\n"
+        "- Panel names with UPPER/LOWER suffixes: if you see 'E-H-02B' with '(UPPER)' annotation,\n"
+        "  output as 'E-H-02B (UPPER)'.  Same for (LOWER).\n"
+        "- 2-line labels: combine into single string (e.g. top='NGR' bottom='E-TR-01B' → 'NGR-E-TR-01B',\n"
+        "  or top='E-TR' bottom='01B' → 'E-TR-01B').\n"
+        "- Do NOT include equipment/device labels, feeder destinations ('TO:' items), or specs.\n"
+        "- Include every distinct panel name — do not collapse series.\n"
+        "- Scan the full page width — panels at the far right edge of the page are often missed.\n\n"
+        "Return JSON only:\n" + json.dumps(_VERIFY_SCHEMA, indent=2)
+    )
+
+    image_urls: List[str] = []
+    for _rb64 in _refs:
+        image_urls.append(f"data:image/png;base64,{_rb64}")
+    image_urls.append(_img_to_data_url(full_page_img))
+
+    raw, elapsed = _call_llm(llm_client, deployment, prompt, image_urls, label="verify-full-page")
+    result = _parse_json(raw)
+    if result is None:
+        return candidate_names, elapsed
+
+    names = result.get("panel_names", [])
+    added = result.get("added", [])
+    removed = result.get("removed", [])
+    if added:
+        print(f"  [verify] Added {len(added)} name(s): {added}")
+    if removed:
+        print(f"  [verify] Removed {len(removed)} name(s): {removed}")
+
+    cleaned = [str(n).strip() for n in names if str(n).strip()]
+    return cleaned, elapsed
+
+
 def extract_panel_names_for_pages(
     pages: List[Tuple[int, Path]],
     tiles_by_page: Dict[int, List[Tuple[int, int, int, int]]],
@@ -395,6 +612,7 @@ def extract_panel_names_for_pages(
     output_dir: Optional[Path] = None,
     save_tiles: bool = False,
     example_img_b64: Optional[str] = None,
+    example_imgs_b64: Optional[List[str]] = None,
 ) -> Dict[str, List[str]]:
     """Full extraction pipeline: tiles → LLM extract → dedup → by_page dict.
 
@@ -406,8 +624,8 @@ def extract_panel_names_for_pages(
         deployment      : model deployment name
         output_dir      : optional folder to save intermediate tile images + JSON
         save_tiles      : save cropped tile PNGs if output_dir is given
-        example_img_b64 : optional base64-encoded PNG of annotated panel box example.
-                          When provided, sent as Image 1 before each tile image.
+        example_img_b64 : optional base64-encoded PNG (legacy single image).
+        example_imgs_b64: optional list of base64-encoded PNGs (multiple references).
 
     Returns:
         {"by_page": {"1": [...], "3": [...], ...}}  (skipped pages omitted)
@@ -446,6 +664,7 @@ def extract_panel_names_for_pages(
             result, tile_elapsed = extract_panel_names_from_tile(
                 tile_img, llm_client, deployment,
                 example_img_b64=example_img_b64,
+                example_imgs_b64=example_imgs_b64,
             )
             timing_records.append({
                 "page_num": page_num, "tile_idx": t_idx + 1,
@@ -500,6 +719,7 @@ def extract_whole_image_names(
     llm_client,
     deployment: str,
     example_img_b64: Optional[str] = None,
+    example_imgs_b64: Optional[List[str]] = None,
     filter_pages: Optional[list] = None,
     max_workers: int = 8,
     timeout: int = 600,
@@ -537,6 +757,7 @@ def extract_whole_image_names(
             names, _elapsed = extract_panel_names_from_tile(
                 img, llm_client, deployment,
                 example_img_b64=example_img_b64,
+                example_imgs_b64=example_imgs_b64,
             )
         except Exception as e:
             print(f"  [Page {pn}] crop {crop_idx} ERROR: {e}")

@@ -51,6 +51,18 @@ VALIDATION_SCHEMA = {
                 "required": ["polygon"],
             },
         },
+        "drop_non_electrical": {
+            "type": "array",
+            "description": "Indices of existing ORANGE-boxed regions that are NOT electrical circuit diagrams and should be dropped.",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "index": {"type": "integer", "description": "Index of the existing box to drop"},
+                    "reason": {"type": "string", "description": "Brief reason why this is not an electrical diagram"},
+                },
+                "required": ["index", "reason"],
+            },
+        },
     },
     "required": ["status", "missing"],
 }
@@ -185,6 +197,46 @@ DIRECTIONAL_VERIFICATION_SCHEMA = {
     "required": ["is_correct", "x1", "y1", "x2", "y2"],
 }
 
+_EDGE_PROPS = {
+    "type": "object",
+    "properties": {
+        "direction": {"type": "string"},
+        "corrected": {"type": "integer", "description": "Corrected pixel value"},
+    },
+    "required": ["direction", "corrected"],
+}
+
+BATCH_VERIFICATION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "crops": {
+            "type": "array",
+            "description": "Evaluation result for each PURPLE candidate crop, in order.",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "index": {"type": "integer", "description": "Crop index label"},
+                    "is_electrical": {
+                        "type": "boolean",
+                        "description": (
+                            "True if this crop contains an electrical circuit diagram "
+                            "(symbols, connection lines, hierarchical flow). "
+                            "False for text tables, notes, legends, title blocks, etc."
+                        ),
+                    },
+                    "issue": {"type": "string", "description": "Brief issue description (empty if correct)"},
+                    "x1": {**_EDGE_PROPS, "description": "Left edge: left=expand, right=shrink, none=ok"},
+                    "y1": {**_EDGE_PROPS, "description": "Top edge: up=expand, down=shrink, none=ok"},
+                    "x2": {**_EDGE_PROPS, "description": "Right edge: right=expand, left=shrink, none=ok"},
+                    "y2": {**_EDGE_PROPS, "description": "Bottom edge: down=expand, up=shrink, none=ok"},
+                },
+                "required": ["index", "is_electrical", "x1", "y1", "x2", "y2"],
+            },
+        },
+    },
+    "required": ["crops"],
+}
+
 
 # ── Client factory ─────────────────────────────────────────────────────────────
 
@@ -210,13 +262,17 @@ def make_client() -> tuple[AzureOpenAI, str]:
 # ── JSON parsing ───────────────────────────────────────────────────────────────
 
 def safe_parse_json(text: str) -> Dict:
+    if not text or not text.strip():
+        print("  [WARN] Empty LLM response, returning empty result")
+        return {"status": "complete", "missing": [], "crops": []}
     text = text.strip()
     try:
         return json.loads(text)
     except json.JSONDecodeError:
         match = re.search(r"\{.*\}", text, flags=re.DOTALL)
         if not match:
-            raise
+            print(f"  [WARN] Could not parse JSON from LLM response: {text[:200]}")
+            return {"status": "complete", "missing": [], "crops": []}
         return json.loads(match.group(0))
 
 
@@ -258,17 +314,35 @@ def _build_detection_prompt(
         "✅ CONNECTION LINES: vertical/horizontal/diagonal lines (solid or dashed) showing power flow\n"
         "✅ HIERARCHICAL FLOW: power source → transformer → breaker → load (top-to-bottom)\n"
         "✅ SYSTEM DIAGRAMS: showing how electrical components are interconnected\n"
-        "\n❌ EXCLUDE (NOT image regions):\n"
+        "\n❌ EXCLUDE (NOT image regions — these must NEVER be captured):\n"
         "- Pure data tables: REVISION DESCRIPTION, RELAY FUNCTION TABLE (rows/columns of text only)\n"
+        "- **PANEL SCHEDULE TABLES / EQUIPMENT LISTS / LOAD SCHEDULES**: grid-like tables with rows of data\n"
+        "  (circuit numbers, wire sizes, loads, breaker ratings, room names) — these are TEXT TABLES, not diagrams\n"
+        "- **DRAWING LIST / INDEX pages**: tables listing drawing numbers and descriptions\n"
         "- Document metadata tables, title blocks, standalone notes\n"
         "- Page header strips (very wide, very short regions at the top of the page — e.g. drawing number, room name)\n"
         "- Standalone notes/legend/notices boxes that contain only text and tables, no circuit symbols\n"
+        "- **RIGHT-SIDE / LEFT-SIDE DESCRIPTION PANELS**: CAD drawings often have a vertical panel on the RIGHT\n"
+        "  or LEFT edge containing notes, relay function tables, general notes, symbol legends,\n"
+        "  equipment descriptions, or specification text. These are NOT circuit diagrams — exclude them.\n"
+        "- **KEY TEST: Does the region contain visual SYMBOLS (⚡□○M) connected by LINES?**\n"
+        "  → If YES: it is a circuit diagram ✅\n"
+        "  → If NO (only text, numbers, table grids, notes): it is NOT a diagram ❌\n"
         "\n**Key distinction**: \n"
         "- Circuit diagram = SYMBOLS + CONNECTION LINES + electrical flow → IMAGE REGION ✅\n"
         "- Data table / notes box / page header = text only, no symbols → NOT an image region ❌\n"
         + content_hint
         + coverage_warning
         + "\n\n**📸 Image description:** The image shows the full page with ORANGE boxes marking already-captured regions.\n"
+        + "\n\n**🔍 EXISTING BOX REVIEW (IMPORTANT):**\n"
+        "Some ORANGE boxes may have been auto-detected by OCR and might NOT be electrical circuit diagrams.\n"
+        "For EACH existing ORANGE box, evaluate whether it actually contains an electrical circuit diagram:\n"
+        "  ✅ KEEP: Contains electrical symbols, connection lines, circuit components\n"
+        "  ❌ DROP: Contains only text tables, revision history, relay function tables, notes, \n"
+        "           legends, logos, photos, non-electrical drawings, or any non-circuit content\n"
+        "  ❌ DROP: Panel schedule tables, equipment lists, load schedules (grid/table of data, no circuit symbols)\n"
+        "If any existing box should be dropped, list its index in `drop_non_electrical`.\n"
+        "If all existing boxes are valid electrical diagrams, return `drop_non_electrical: []`.\n"
         + "\n\nJSON schema: " + json.dumps(VALIDATION_SCHEMA)
         + "\n\nExisting boxes: " + json.dumps(crop_boxes)
         + "\n\nFull image size (width, height): " + json.dumps(image_size)
@@ -541,6 +615,61 @@ def _build_verification_prompt_v4(
     return prompt
 
 
+def build_batch_verification_prompt(
+    existing_boxes: List[Dict],
+    candidate_boxes: List[Dict],
+    image_size: Tuple[int, int],
+    grid_step_x: int = GRID_STEP_X,
+    grid_step_y: int = GRID_STEP_Y,
+) -> str:
+    """Prompt for batch verification: evaluate ALL candidate crops in 1 LLM call.
+
+    Overlay colours:  🟠 ORANGE = existing confirmed  |  🟣 PURPLE = new candidates
+    Images sent: overlay (1st), then one crop image per candidate (2nd, 3rd, ...).
+    """
+    w, h = image_size
+    n = len(candidate_boxes)
+
+    return (
+        "You are verifying candidate bounding boxes for electrical circuit diagram regions "
+        "on an engineering drawing page.\n\n"
+        "**📸 IMAGE DESCRIPTION:**\n"
+        f"- Image 1: Full page ({w}×{h}px) with coordinate grid overlay\n"
+        f"- Grid: lines every {grid_step_x}px (x) / {grid_step_y}px (y), cells labeled (col,row)\n"
+        "- 🟠 **ORANGE boxes**: Already-confirmed regions (DO NOT evaluate)\n"
+        f"- 🟣 **PURPLE boxes with index labels**: {n} NEW candidates to evaluate\n"
+        f"- Images 2–{n+1}: Cropped content of each PURPLE candidate (same order)\n\n"
+        "**🔌 What IS an electrical circuit diagram?**\n"
+        "✅ Visual SYMBOLS (transformers ⚡, breakers □, relays ○, motors M, switches, contactors)\n"
+        "✅ CONNECTION LINES (solid/dashed) showing power flow\n"
+        "✅ HIERARCHICAL FLOW (source → transformer → breaker → load)\n"
+        "❌ NOT a diagram: text tables, revision history, title blocks, notes/legends, "
+        "page headers, photos, non-electrical drawings\n"
+        "❌ NOT a diagram: **Panel schedule tables, equipment lists, load schedules** — "
+        "these are grid/table layouts with rows of text data (circuit numbers, wire sizes, breaker ratings), "
+        "NOT circuit diagrams with visual symbols and connection lines\n\n"
+        f"**YOUR TASK:** Evaluate each of the {n} PURPLE candidates.\n"
+        "For each:\n"
+        "1. **is_electrical**: Does it contain a circuit diagram? (true/false)\n"
+        "2. **Edge analysis** (x1/y1/x2/y2): Does each edge need adjustment?\n"
+        "   - Content cut off → expand (left/up/right/down)\n"
+        "   - Excess whitespace → shrink (right/down/left/up)\n"
+        "   - Correct → 'none'\n"
+        "3. **issue**: Brief problem description (empty if correct)\n\n"
+        "**RULES:**\n"
+        "1. If NOT electrical: is_electrical=false, all directions='none', "
+        "corrected values = current bbox edges\n"
+        "2. If valid with correct edges: is_electrical=true, all 'none'\n"
+        "3. If edges need fixing: provide corrected pixel coords using the grid\n"
+        "4. Include COMPLETE circuits: all lines to endpoints, bottom motors/terminals\n"
+        "5. Better to include EXTRA space than cut off content\n\n"
+        f"**Existing ORANGE boxes:** {json.dumps(existing_boxes)}\n\n"
+        f"**PURPLE candidates:** {json.dumps(candidate_boxes)}\n\n"
+        f"**Image size:** {w} × {h} pixels\n\n"
+        f"**JSON schema:**\n{json.dumps(BATCH_VERIFICATION_SCHEMA)}\n"
+    )
+
+
 # ── API call wrappers ──────────────────────────────────────────────────────────
 
 def responses_call(
@@ -584,7 +713,7 @@ def responses_call(
                 "role": "user",
                 "content": [
                     {"type": "input_text", "text": full_prompt},
-                    {"type": "input_image", "image_url": image_to_data_url(send_img), "detail": "original"},
+                    {"type": "input_image", "image_url": image_to_data_url(send_img), "detail": "high"},
                 ],
             }
         ],
@@ -610,7 +739,7 @@ def responses_call_with_image(
     images: List[np.ndarray] = [image] if isinstance(image, np.ndarray) else image
     content: List[Dict] = [{"type": "input_text", "text": prompt}]
     for img in images:
-        content.append({"type": "input_image", "image_url": image_to_data_url(img), "detail": "original"})
+        content.append({"type": "input_image", "image_url": image_to_data_url(img), "detail": "high"})
     t0 = time.time()
     response = client.responses.create(
         model=deployment,
@@ -647,7 +776,7 @@ def recheck_is_circuit_diagram(
     )
     content: List[Dict] = [
         {"type": "input_text", "text": prompt},
-        {"type": "input_image", "image_url": image_to_data_url(crop_image), "detail": "original"},
+        {"type": "input_image", "image_url": image_to_data_url(crop_image), "detail": "high"},
     ]
     response = client.responses.create(
         model=deployment,
@@ -759,8 +888,8 @@ def check_di_crop(
     )
     content: List[Dict] = [
         {"type": "input_text", "text": prompt},
-        {"type": "input_image", "image_url": image_to_data_url(page_overlay_img), "detail": "original"},
-        {"type": "input_image", "image_url": image_to_data_url(crop_image), "detail": "original"},
+        {"type": "input_image", "image_url": image_to_data_url(page_overlay_img), "detail": "high"},
+        {"type": "input_image", "image_url": image_to_data_url(crop_image), "detail": "high"},
     ]
     response = client.responses.create(
         model=deployment,
