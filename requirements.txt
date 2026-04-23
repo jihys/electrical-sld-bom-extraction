@@ -1,0 +1,26 @@
+# Core dependencies for Streamlit HITL UI deployment
+# Azure AI
+azure-ai-documentintelligence>=1.0.0
+azure-identity>=1.15.0
+azure-storage-blob>=12.0.0
+openai>=1.50.0
+
+# Image / PDF processing
+PyMuPDF>=1.24.0
+opencv-python-headless>=4.10.0
+numpy>=1.24.0
+Pillow>=10.0.0
+matplotlib>=3.8.0
+
+# Web / HITL
+streamlit>=1.30.0
+
+# Core
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+python-dotenv>=1.0.0
+python-multipart>=0.0.7
+
+# Azure Cosmos + Service Bus (for persistent state)
+azure-cosmos>=4.5.0
+azure-servicebus>=7.11.0

@@ -100,17 +100,18 @@ resource webApp 'Microsoft.Web/sites@2023-12-01' = {
         { name: 'GRID_SIZE', value: '120' }
         { name: 'VERIFY_MAX_TRIES', value: '10' }
         // ── Python ──
-        { name: 'SCM_DO_BUILD_DURING_DEPLOYMENT', value: 'true' }
+        { name: 'SCM_DO_BUILD_DURING_DEPLOYMENT', value: 'false' }
         { name: 'WEBSITES_PORT', value: '8000' }
+        { name: 'WEBSITES_CONTAINER_START_TIME_LIMIT', value: '600' }
       ]
     }
   }
 }
 
 // ── Startup command script ────────────────────────────────────────
-// App Service Python on Linux uses Oryx build system.
-// SCM_DO_BUILD_DURING_DEPLOYMENT=true runs pip install automatically.
-// The startup command is set via linuxFxVersion + appCommandLine.
+// Oryx build is DISABLED – startup.sh installs deps into a persistent
+// venv at /home/site/venv on first boot (~10 min cold start on B2).
+// Subsequent restarts skip pip install (hash-based marker file).
 
 // ── Outputs ───────────────────────────────────────────────────────
 output appServiceName string = webApp.name
